@@ -1,11 +1,13 @@
+import os
 import time
+import torch
 import numpy as np
 
 from utils import Logger
 
 
 class Experiment:
-    def __init__(self, mpc, policy, logdir, args):
+    def __init__(self, mpc, policy, logdir, savedir, args):
         """Experiment.
 
         Argument:
@@ -14,6 +16,7 @@ class Experiment:
             policy (Policy): Parameterized reactive policy to be trained by
                 imitation learning on model-based controller.
             logdir: Log directory for Tensorboard.
+            savedir:
             args (DotMap): A DotMap of experiment parameters.
                 .env: (OpenAI gym environment) The environment for this agent.
                 .task_hor (int): Task horizon.
@@ -24,6 +27,9 @@ class Experiment:
         self.env = args.env
         self.task_hor = args.task_hor
         self.num_rollouts = args.num_rollouts
+
+        self.path_mpc = os.path.join(savedir, 'mpc.pth')
+        self.path_policy = os.path.join(savedir, 'policy.pth')
 
         # Tensorboard summary writer
         self.logger = Logger(logdir)
@@ -37,45 +43,56 @@ class Experiment:
 
         # Training loop
         for i in range(self.num_rollouts):
+            print()
             print("Starting training iteration %d." % (i + 1))
 
-            # 1) Sample rollout from mpc
-            obs_mpc, acts_mpc, reward_sum_mpc = self.sample_rollout(actor='mpc')
+            # Restore model
+            self.mpc = torch.load(self.path_mpc)
 
-            # 2) Sample rollout from policy
-            obs_policy, acts_policy, reward_sum_policy = self.sample_rollout(actor='policy')
+            # Sample rollout from mpc
+            #obs_mpc, acts_mpc, reward_sum_mpc = self.sample_rollout(actor='mpc')
 
-            # TODO aggregate two trajectories, can mpc.train() take multiple trajectories?
+            # Train model
+            #metrics_model, weights_model, grads_model = self.mpc.train(obs_mpc, acts_mpc)
 
-            # 3) Train model
-            metrics_model, weights_model, grads_model = self.mpc.train(obs_mpc, acts_mpc)
+            # Save model
+            #torch.save(self.mpc, self.path_mpc)
 
-            # 4) Train policy by imitating mpc
-            # TODO policy needs actions that MPC would take as labels
-            # TODO we start by learning only on trajectories of mpc, and see how bad it fails
-            metrics_policy = self.policy.train(obs_mpc[:-1], acts_mpc)
+            #print("MPC cumulative reward ", reward_sum_mpc)
+            #print("MPC action min {}, max {}, mean {}, std {}".format(
+            #    acts_mpc.min(), acts_mpc.max(), acts_mpc.mean(), acts_mpc.std()))
 
             # Log to Tensorboard
-            step = (i + 1) * self.task_hor
-            self.logger.log_scalar("reward/mpc", reward_sum_mpc, step)
-            self.logger.log_scalar("reward/policy", reward_sum_policy, step)
+            #step = (i + 1) * self.task_hor
+            #self.logger.log_scalar("reward/mpc", reward_sum_mpc, step)
 
-            for key, metric in metrics_model.items():
-                self.logger.log_scalar("{}/mean".format(key), metric.mean(), step)
+            #for key, metric in metrics_model.items():
+            #    self.logger.log_scalar("{}/mean".format(key), metric.mean(), step)
 
-                for n in range(len(metric)):
-                    self.logger.log_scalar("{}/model{}".format(key, n + 1), metric[n], step)
+                #for n in range(len(metric)):
+                #    self.logger.log_scalar("{}/model{}".format(key, n + 1), metric[n], step)
 
-            for key, metric in metrics_policy.items():
-                self.logger.log_scalar(key, metric, step)
+            #for key, weight in weights_model.items():
+            #    self.logger.log_histogram("weight/{}".format(key), weight, step)
 
-            """
-            for key, weight in weights_model.items():
-                self.logger.log_histogram("weight/{}".format(key), weight, step)
+            #for key, grad in grads_model.items():
+            #    self.logger.log_histogram("grad/{}".format(key), grad, step)
 
-            for key, grad in grads_model.items():
-                self.logger.log_histogram("grad/{}".format(key), grad, step)
-            """
+            # Sample rollout from policy and label it with MPC
+            obs_policy, acts_policy, reward_sum_policy = self.sample_rollout(actor='policy')
+            labels_mpc = self.mpc.label(obs_policy[:-1])
+
+            # Train policy
+            #metrics_policy = self.policy.train(obs_mpc[:-1], acts_mpc)
+            metrics_policy = self.policy.train(obs_policy[:-1], labels_mpc)
+
+            #self.logger.log_scalar("reward/policy", reward_sum_policy, step)
+            #for key, metric in metrics_policy.items():
+            #    self.logger.log_scalar(key, metric, step)
+
+            print("Policy cumulative reward ", reward_sum_policy)
+            print("Policy action min {}, max {}, mean {}, std {}".format(
+                acts_policy.min(), acts_policy.max(), acts_policy.mean(), acts_policy.std()))
 
 
     def sample_rollout(self, actor):
@@ -95,36 +112,24 @@ class Experiment:
 
         if actor == 'mpc':
             self.mpc.reset()
-            for t in range(self.task_hor):
-                start = time.time()
+
+        for t in range(self.task_hor):
+            start = time.time()
+
+            if actor == 'mpc':
                 A.append(self.mpc.act(O[t]))
-                times.append(time.time() - start)
-
-                obs, reward, done, info = self.env.step(A[t])
-
-                O.append(obs)
-                reward_sum += reward
-
-                if done:
-                    break
-
-            print("MPC cumulative reward: ", reward_sum)
-
-        else:
-            for t in range(self.task_hor):
-                start = time.time()
+            else:
                 A.append(self.policy.act(O[t]))
-                times.append(time.time() - start)
 
-                obs, reward, done, info = self.env.step(A[t])
+            times.append(time.time() - start)
 
-                O.append(obs)
-                reward_sum += reward
+            obs, reward, done, info = self.env.step(A[t])
 
-                if done:
-                    break
+            O.append(obs)
+            reward_sum += reward
 
-            print("Policy cumulative reward: ", reward_sum)
+            if done:
+                break
 
         #print("Average action selection time: ", np.mean(times))
 

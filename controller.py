@@ -175,7 +175,8 @@ class MPC:
         if not self.has_been_trained:
             return np.random.uniform(self.act_low, self.act_high, self.act_low.shape)
 
-        # Store current observation for self._compile_cost()
+        # Store current observation for self._compile_cost() called by
+        # self.optimizer.obtain_solution()
         self.cur_obs = obs
 
         # Compute action plan over time horizon
@@ -185,8 +186,33 @@ class MPC:
         self.prev_plan = np.concatenate([plan[self.act_features:], np.zeros(self.act_features)])
 
         # Return the first action
-        action = plan[:self.act_features]
-        return action
+        act = plan[:self.act_features]
+        return act
+
+    def label(self, obs):
+        """Returns the action that this controller would take for each of the observations
+            in obs.
+
+        Arguments:
+            obs (2D numpy.ndarray): Observations.
+
+        Returns: Actions (2D numpy.ndarray).
+        """
+        # TODO could parallellize action labeling
+        acts = []
+
+        for ob in obs:
+            # Be careful: cannot label() will mess with act() if interleaved!
+            self.cur_obs = ob
+
+            # Compute action plan over time horizon
+            plan = self.optimizer.obtain_solution(np.zeros(self.plan_hor * self.act_features),
+                                                  self.init_var)
+
+            # Store the first action
+            acts.append(plan[:self.act_features])
+
+        return np.array(acts)
 
     @torch.no_grad()
     def _compile_cost(self, plans):

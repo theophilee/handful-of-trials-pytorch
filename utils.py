@@ -11,7 +11,8 @@ def silent_remove(d):
 
 
 class Logger:
-    """Logging in Tensorboard without Tensorflow ops.
+    """Logging in Tensorboard without Tensorflow ops (or TensorboardX which does not work
+    in this conda environment for some reason).
     """
     def __init__(self, logdir):
         silent_remove(logdir)

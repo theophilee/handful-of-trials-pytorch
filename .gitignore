@@ -63,5 +63,6 @@ log/
 *.lprof
 .DS_Store
 
-# Logs
+# Logs and save files
 logs
+save

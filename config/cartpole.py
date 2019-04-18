@@ -8,7 +8,8 @@ class Config:
     def __init__(self):
         self.env = gym.make("MBRLCartpole-v0")
         self.task_hor = 200
-        self.num_rollouts = 15
+        #self.num_rollouts = 15
+        self.num_rollouts = 50
         self.in_features, self.out_features = 6, 4
 
         self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')

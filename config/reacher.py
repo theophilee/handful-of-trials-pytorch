@@ -1,166 +1,47 @@
-from __future__ import division
-from __future__ import print_function
-from __future__ import absolute_import
-
-import numpy as np
 import gym
-
+import numpy as np
 import torch
-from torch import nn as nn
-from torch.nn import functional as F
-
-from config.utils import swish, get_affine_params
-from DotmapUtils import get_required_argument
+from dotmap import DotMap
 
 
-TORCH_DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-
-
-class PtModel(nn.Module):
-
-    def __init__(self, ensemble_size, in_features, out_features):
-        super().__init__()
-
-        self.num_nets = ensemble_size
-
-        self.in_features = in_features
-        self.out_features = out_features
-
-        self.lin0_w, self.lin0_b = get_affine_params(ensemble_size, in_features, 200)
-
-        self.lin1_w, self.lin1_b = get_affine_params(ensemble_size, 200, 200)
-
-        self.lin2_w, self.lin2_b = get_affine_params(ensemble_size, 200, 200)
-
-        self.lin3_w, self.lin3_b = get_affine_params(ensemble_size, 200, out_features)
-
-        self.inputs_mu = nn.Parameter(torch.zeros(in_features), requires_grad=False)
-        self.inputs_sigma = nn.Parameter(torch.zeros(in_features), requires_grad=False)
-
-        self.max_logvar = nn.Parameter(torch.ones(1, out_features // 2, dtype=torch.float32) / 2.0)
-        self.min_logvar = nn.Parameter(- torch.ones(1, out_features // 2, dtype=torch.float32) * 10.0)
-
-    def compute_decays(self):
-
-        lin0_decays = 0.00025 * (self.lin0_w ** 2).sum() / 2.0
-        lin1_decays = 0.0005 * (self.lin1_w ** 2).sum() / 2.0
-        lin2_decays = 0.0005 * (self.lin2_w ** 2).sum() / 2.0
-        lin3_decays = 0.00075 * (self.lin3_w ** 2).sum() / 2.0
-
-        return lin0_decays + lin1_decays + lin2_decays + lin3_decays
-
-    def fit_input_stats(self, data):
-
-        mu = np.mean(data, axis=0, keepdims=True)
-        sigma = np.std(data, axis=0, keepdims=True)
-        sigma[sigma < 1e-12] = 1.0
-
-        self.inputs_mu.data = torch.from_numpy(mu).to(TORCH_DEVICE).float()
-        self.inputs_sigma.data = torch.from_numpy(sigma).to(TORCH_DEVICE).float()
-
-    def forward(self, inputs, ret_logvar=False):
-
-        # Transform inputs
-        inputs = (inputs - self.inputs_mu) / self.inputs_sigma
-
-        inputs = inputs.matmul(self.lin0_w) + self.lin0_b
-        inputs = swish(inputs)
-
-        inputs = inputs.matmul(self.lin1_w) + self.lin1_b
-        inputs = swish(inputs)
-
-        inputs = inputs.matmul(self.lin2_w) + self.lin2_b
-        inputs = swish(inputs)
-
-        inputs = inputs.matmul(self.lin3_w) + self.lin3_b
-
-        mean = inputs[:, :, :self.out_features // 2]
-
-        logvar = inputs[:, :, self.out_features // 2:]
-        logvar = self.max_logvar - F.softplus(self.max_logvar - logvar)
-        logvar = self.min_logvar + F.softplus(logvar - self.min_logvar)
-
-        if ret_logvar:
-            return mean, logvar
-
-        return mean, torch.exp(logvar)
-
-
-class ReacherConfigModule:
-    ENV_NAME = "MBRLReacher3D-v0"
-    TASK_HORIZON = 150
-    NTRAIN_ITERS = 100
-    NROLLOUTS_PER_ITER = 1
-    PLAN_HOR = 25
-    MODEL_IN, MODEL_OUT = 24, 17
-    GP_NINDUCING_POINTS = 200
-
+class Config:
     def __init__(self):
-        self.ENV = gym.make(self.ENV_NAME)
-        self.ENV.reset()
-        self.NN_TRAIN_CFG = {"epochs": 5}
-        self.OPT_CFG = {
-            "Random": {
-                "popsize": 2000
-            },
-            "CEM": {
-                "popsize": 400,
-                "num_elites": 40,
-                "max_iters": 5,
-                "alpha": 0.1
-            }
-        }
-        self.UPDATE_FNS = [self.update_goal]
+        self.env = gym.make("MBRLReacher3D-v0")
+        self.task_hor = 150
+        self.num_rollouts = 100
+        self.in_features, self.out_features = 24, 17
 
-        self.goal = None
+        self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
-    @staticmethod
-    def obs_postproc(obs, pred):
+    def obs_preproc(self, obs):
+        return obs
+
+    def pred_postproc(self, obs, pred):
         return obs + pred
 
-    @staticmethod
-    def targ_proc(obs, next_obs):
+    def targ_proc(self, obs, next_obs):
         return next_obs - obs
 
     def update_goal(self):
-        self.goal = self.ENV.goal
+        self.goal = self.env.goal
 
-    def obs_cost_fn(self, obs):
-
+    def get_cost_obs(self, obs):
         assert isinstance(obs, torch.Tensor)
         assert self.goal is not None
 
         obs = obs.detach().cpu().numpy()
 
-        ee_pos = ReacherConfigModule.get_ee_pos(obs)
+        ee_pos = self.get_ee_pos(obs)
         dis = ee_pos - self.goal
 
         cost = np.sum(np.square(dis), axis=1)
 
-        return torch.from_numpy(cost).float().to(TORCH_DEVICE)
+        return torch.from_numpy(cost).float().to(self.device)
 
-    @staticmethod
-    def ac_cost_fn(acs):
-        return 0.01 * (acs ** 2).sum(dim=1)
+    def get_cost_acts(self, acts):
+        return 0.01 * (acts ** 2).sum(dim=1)
 
-    def nn_constructor(self, model_init_cfg):
-        ensemble_size = get_required_argument(model_init_cfg, "num_nets", "Must provide ensemble size")
-
-        load_model = model_init_cfg.get("load_model", False)
-
-        assert load_model is False, 'Has yet to support loading model'
-
-        model = PtModel(ensemble_size,
-                        self.MODEL_IN, self.MODEL_OUT * 2).to(TORCH_DEVICE)
-        # * 2 because we output both the mean and the variance
-
-        model.optim = torch.optim.Adam(model.parameters(), lr=0.001)
-
-        return model
-
-    @staticmethod
-    def get_ee_pos(states):
-
+    def get_ee_pos(self, states):
         theta1, theta2, theta3, theta4, theta5, theta6, theta7 = \
             states[:, :1], states[:, 1:2], states[:, 2:3], states[:, 3:4], states[:, 4:5], states[:, 5:6], states[:, 6:]
 
@@ -188,5 +69,40 @@ class ReacherConfigModule:
 
         return cur_end
 
+    def get_config(self):
+        exp_cfg = DotMap({"env": self.env,
+                          "task_hor": self.task_hor,
+                          "num_rollouts": self.num_rollouts})
 
-CONFIG_MODULE = ReacherConfigModule
+        model_cfg = DotMap({"ensemble_size": 5,
+                            "in_features": self.in_features,
+                            "out_features": self.out_features,
+                            "hid_features": [200, 200],
+                            "activation": "swish",
+                            "lr": 1e-3,
+                            "weight_decay": 1e-4})
+
+        opt_cfg = DotMap({"max_iters": 5,
+                          "popsize": 500,
+                          "num_elites": 50,
+                          "epsilon": 0.01,
+                          "alpha": 0.1})
+
+        mpc_cfg = DotMap({"env": self.env,
+                          "plan_hor": 25,
+                          "num_part": 20,
+                          "train_epochs": 5,
+                          "batch_size": 32,
+                          "obs_preproc": self.obs_preproc,
+                          "pred_postproc": self.pred_postproc,
+                          "targ_proc": self.targ_proc,
+                          "get_cost_obs": self.get_cost_obs,
+                          "get_cost_acts": self.get_cost_acts,
+                          "reset_fns": [self.update_goal],
+                          "model_cfg": model_cfg,
+                          "opt_cfg": opt_cfg})
+
+        cfg = DotMap({"exp_cfg": exp_cfg,
+                      "mpc_cfg": mpc_cfg})
+
+        return cfg

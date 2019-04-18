@@ -1,148 +1,42 @@
-from __future__ import division
-from __future__ import print_function
-from __future__ import absolute_import
-
-import numpy as np
 import gym
 import torch
-from torch import nn as nn
-from torch.nn import functional as F
-
-from DotmapUtils import get_required_argument
-from config.utils import swish, get_affine_params
-
-TORCH_DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+from dotmap import DotMap
 
 
-class PtModel(nn.Module):
-
-    def __init__(self, ensemble_size, in_features, out_features):
-        super().__init__()
-
-        self.num_nets = ensemble_size
-
-        self.in_features = in_features
-        self.out_features = out_features
-
-        self.lin0_w, self.lin0_b = get_affine_params(ensemble_size, in_features, 200)
-
-        self.lin1_w, self.lin1_b = get_affine_params(ensemble_size, 200, 200)
-
-        self.lin2_w, self.lin2_b = get_affine_params(ensemble_size, 200, 200)
-
-        self.lin3_w, self.lin3_b = get_affine_params(ensemble_size, 200, out_features)
-
-        self.inputs_mu = nn.Parameter(torch.zeros(in_features), requires_grad=False)
-        self.inputs_sigma = nn.Parameter(torch.zeros(in_features), requires_grad=False)
-
-        self.max_logvar = nn.Parameter(torch.ones(1, out_features // 2, dtype=torch.float32) / 2.0)
-        self.min_logvar = nn.Parameter(- torch.ones(1, out_features // 2, dtype=torch.float32) * 10.0)
-
-    def compute_decays(self):
-
-        lin0_decays = 0.00025 * (self.lin0_w ** 2).sum() / 2.0
-        lin1_decays = 0.0005 * (self.lin1_w ** 2).sum() / 2.0
-        lin2_decays = 0.0005 * (self.lin2_w ** 2).sum() / 2.0
-        lin3_decays = 0.00075 * (self.lin3_w ** 2).sum() / 2.0
-
-        return lin0_decays + lin1_decays + lin2_decays + lin3_decays
-
-    def fit_input_stats(self, data):
-
-        mu = np.mean(data, axis=0, keepdims=True)
-        sigma = np.std(data, axis=0, keepdims=True)
-        sigma[sigma < 1e-12] = 1.0
-
-        self.inputs_mu.data = torch.from_numpy(mu).to(TORCH_DEVICE).float()
-        self.inputs_sigma.data = torch.from_numpy(sigma).to(TORCH_DEVICE).float()
-
-    def forward(self, inputs, ret_logvar=False):
-
-        # Transform inputs
-        inputs = (inputs - self.inputs_mu) / self.inputs_sigma
-
-        inputs = inputs.matmul(self.lin0_w) + self.lin0_b
-        inputs = swish(inputs)
-
-        inputs = inputs.matmul(self.lin1_w) + self.lin1_b
-        inputs = swish(inputs)
-
-        inputs = inputs.matmul(self.lin2_w) + self.lin2_b
-        inputs = swish(inputs)
-
-        inputs = inputs.matmul(self.lin3_w) + self.lin3_b
-
-        mean = inputs[:, :, :self.out_features // 2]
-
-        logvar = inputs[:, :, self.out_features // 2:]
-        logvar = self.max_logvar - F.softplus(self.max_logvar - logvar)
-        logvar = self.min_logvar + F.softplus(logvar - self.min_logvar)
-
-        if ret_logvar:
-            return mean, logvar
-
-        return mean, torch.exp(logvar)
-
-
-class PusherConfigModule:
-    ENV_NAME = "MBRLPusher-v0"
-    TASK_HORIZON = 150
-    NTRAIN_ITERS = 100
-    NROLLOUTS_PER_ITER = 1
-    PLAN_HOR = 25
-    MODEL_IN, MODEL_OUT = 27, 20
-    GP_NINDUCING_POINTS = 200
-
+class Config:
     def __init__(self):
-        self.ENV = gym.make(self.ENV_NAME)
-        self.NN_TRAIN_CFG = {"epochs": 5}
-        self.OPT_CFG = {
-            "Random": {
-                "popsize": 2500
-            },
-            "CEM": {
-                "popsize": 500,
-                "num_elites": 50,
-                "max_iters": 5,
-                "alpha": 0.1
-            }
-        }
+        self.env = gym.make("MBRLPusher-v0")
+        self.task_hor = 150
+        self.num_rollouts = 100
+        self.in_features, self.out_features = 27, 20
 
-        # Keep track of the previous goal pos
-        # to determine if we should replace the goal pos on GPU
-        # to minimize communication overhead
+        self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         self.prev_ac_goal_pos = None
         self.goal_pos_gpu = None
 
-    @staticmethod
-    def obs_postproc(obs, pred):
+    def obs_preproc(self, obs):
+        return obs
+
+    def pred_postproc(self, obs, pred):
         return obs + pred
 
-    @staticmethod
-    def targ_proc(obs, next_obs):
+    def targ_proc(self, obs, next_obs):
         return next_obs - obs
 
-    def obs_cost_fn(self, obs):
-        to_w, og_w = 0.5, 1.25
-        tip_pos, obj_pos, goal_pos = obs[:, 14:17], obs[:, 17:20], self.ENV.ac_goal_pos
-
+    def get_cost_obs(self, obs):
         assert isinstance(obs, torch.Tensor)
 
+        to_w, og_w = 0.5, 1.25
+        tip_pos, obj_pos, goal_pos = obs[:, 14:17], obs[:, 17:20], self.env.ac_goal_pos
+
         should_replace = False
-
-        # If there was a previous goal pos
-        # and the current goal pos is different from the previous goal post...
         if self.prev_ac_goal_pos is not None and (self.prev_ac_goal_pos == goal_pos).all() is False:
-            # then we replace the goal pos on GPU
             should_replace = True
-
-        # else if there is no current goal pos...
         elif self.goal_pos_gpu is None:
-            # then we also move the goal pos to GPU
             should_replace = True
 
         if should_replace:
-            self.goal_pos_gpu = torch.from_numpy(goal_pos).float().to(TORCH_DEVICE)
+            self.goal_pos_gpu = torch.from_numpy(goal_pos).float().to(self.device)
             self.prev_ac_goal_pos = goal_pos
 
         tip_obj_dist = (tip_pos - obj_pos).abs().sum(dim=1)
@@ -150,24 +44,43 @@ class PusherConfigModule:
 
         return to_w * tip_obj_dist + og_w * obj_goal_dist
 
-    @staticmethod
-    def ac_cost_fn(acs):
-        return 0.1 * (acs ** 2).sum(dim=1)
+    def get_cost_acts(self, acts):
+        return 0.1 * (acts ** 2).sum(dim=1)
 
-    def nn_constructor(self, model_init_cfg):
-        ensemble_size = get_required_argument(model_init_cfg, "num_nets", "Must provide ensemble size")
+    def get_config(self):
+        exp_cfg = DotMap({"env": self.env,
+                          "task_hor": self.task_hor,
+                          "num_rollouts": self.num_rollouts})
 
-        load_model = model_init_cfg.get("load_model", False)
+        model_cfg = DotMap({"ensemble_size": 5,
+                            "in_features": self.in_features,
+                            "out_features": self.out_features,
+                            "hid_features": [200, 200],
+                            "activation": "swish",
+                            "lr": 1e-3,
+                            "weight_decay": 1e-4})
 
-        assert load_model is False, 'Has yet to support loading model'
+        opt_cfg = DotMap({"max_iters": 5,
+                          "popsize": 500,
+                          "num_elites": 50,
+                          "epsilon": 0.01,
+                          "alpha": 0.1})
 
-        model = PtModel(ensemble_size,
-                        self.MODEL_IN, self.MODEL_OUT * 2).to(TORCH_DEVICE)
-        # * 2 because we output both the mean and the variance
+        mpc_cfg = DotMap({"env": self.env,
+                          "plan_hor": 25,
+                          "num_part": 20,
+                          "train_epochs": 5,
+                          "batch_size": 32,
+                          "obs_preproc": self.obs_preproc,
+                          "pred_postproc": self.pred_postproc,
+                          "targ_proc": self.targ_proc,
+                          "get_cost_obs": self.get_cost_obs,
+                          "get_cost_acts": self.get_cost_acts,
+                          "reset_fns": [],
+                          "model_cfg": model_cfg,
+                          "opt_cfg": opt_cfg})
 
-        model.optim = torch.optim.Adam(model.parameters(), lr=0.001)
+        cfg = DotMap({"exp_cfg": exp_cfg,
+                      "mpc_cfg": mpc_cfg})
 
-        return model
-
-
-CONFIG_MODULE = PusherConfigModule
+        return cfg

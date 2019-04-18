@@ -1,136 +1,90 @@
-from __future__ import division
-from __future__ import print_function
-from __future__ import absolute_import
+import time
+import numpy as np
 
-import os
-from time import localtime, strftime
-
-from dotmap import DotMap
-from scipy.io import savemat
-from tqdm import trange
-
-from agent import Agent
-from DotmapUtils import get_required_argument
+from utils import Logger
 
 
-class MBExperiment:
-    def __init__(self, params):
-        """Initializes class instance.
+class Experiment:
+    def __init__(self, policy, logdir, args):
+        """Experiment.
 
         Argument:
-            params (DotMap): A DotMap containing the following:
-                .sim_cfg:
-                    .env (gym.env): Environment for this experiment
-                    .task_hor (int): Task horizon
-                    .stochastic (bool): (optional) If True, agent adds noise to its actions.
-                        Must provide noise_std (see below). Defaults to False.
-                    .noise_std (float): for stochastic agents, noise of the form N(0, noise_std^2I)
-                        will be added.
-
-                .exp_cfg:
-                    .ntrain_iters (int): Number of training iterations to be performed.
-                    .nrollouts_per_iter (int): (optional) Number of rollouts done between training
-                        iterations. Defaults to 1.
-                    .ninit_rollouts (int): (optional) Number of initial rollouts. Defaults to 1.
-                    .policy (controller): Policy that will be trained.
-
-                .log_cfg:
-                    .logdir (str): Parent of directory path where experiment data will be saved.
-                        Experiment will be saved in logdir/<date+time of experiment start>
-                    .nrecord (int): (optional) Number of rollouts to record for every iteration.
-                        Defaults to 0.
-                    .neval (int): (optional) Number of rollouts for performance evaluation.
-                        Defaults to 1.
+            policy (MPC): Policy to be trained.
+            logdir: Log directory for Tensorboard.
+            args (DotMap): A DotMap of experiment parameters.
+                .env: (OpenAI gym environment) The environment for this agent.
+                .task_hor (int): Task horizon.
+                .num_rollouts (int): Number of rollouts for which we train.
         """
+        self.policy = policy
+        self.env = args.env
+        self.task_hor = args.task_hor
+        self.num_rollouts = args.num_rollouts
 
-        # Assert True arguments that we currently do not support
-        assert params.sim_cfg.get("stochastic", False) == False
-
-        self.env = get_required_argument(params.sim_cfg, "env", "Must provide environment.")
-        self.task_hor = get_required_argument(params.sim_cfg, "task_hor", "Must provide task horizon.")
-        self.agent = Agent(DotMap(env=self.env, noisy_actions=False))
-
-        self.ntrain_iters = get_required_argument(
-            params.exp_cfg, "ntrain_iters", "Must provide number of training iterations."
-        )
-        self.nrollouts_per_iter = params.exp_cfg.get("nrollouts_per_iter", 1)
-        self.ninit_rollouts = params.exp_cfg.get("ninit_rollouts", 1)
-        self.policy = get_required_argument(params.exp_cfg, "policy", "Must provide a policy.")
-
-        self.logdir = os.path.join(
-            get_required_argument(params.log_cfg, "logdir", "Must provide log parent directory."),
-            strftime("%Y-%m-%d--%H:%M:%S", localtime())
-        )
-        self.nrecord = params.log_cfg.get("nrecord", 0)
-        self.neval = params.log_cfg.get("neval", 1)
+        # Tensorboard summary writer
+        self.logger = Logger(logdir)
 
     def run_experiment(self):
-        """Perform experiment.
+        """Train policy.
         """
-        os.makedirs(self.logdir, exist_ok=True)
-
-        traj_obs, traj_acs, traj_rets, traj_rews = [], [], [], []
-
-        # Perform initial rollouts
-        samples = []
-        for i in range(self.ninit_rollouts):
-            samples.append(
-                self.agent.sample(
-                    self.task_hor, self.policy
-                )
-            )
-            traj_obs.append(samples[-1]["obs"])
-            traj_acs.append(samples[-1]["ac"])
-            traj_rews.append(samples[-1]["rewards"])
-
-        if self.ninit_rollouts > 0:
-            self.policy.train(
-                [sample["obs"] for sample in samples],
-                [sample["ac"] for sample in samples],
-                [sample["rewards"] for sample in samples]
-            )
+        # Initial rollout
+        obs, acts, reward_sum = self.sample_rollout()
+        self.policy.train(obs, acts)
 
         # Training loop
-        for i in trange(self.ntrain_iters):
-            print("####################################################################")
+        for i in range(self.num_rollouts):
             print("Starting training iteration %d." % (i + 1))
 
-            iter_dir = os.path.join(self.logdir, "train_iter%d" % (i + 1))
-            os.makedirs(iter_dir, exist_ok=True)
+            # Sample rollout
+            obs, acts, reward_sum = self.sample_rollout()
 
-            samples = []
+            # Train model
+            metrics, weights, grads = self.policy.train(obs, acts)
 
-            for j in range(max(self.neval, self.nrollouts_per_iter)):
-                samples.append(
-                    self.agent.sample(
-                        self.task_hor, self.policy
-                    )
-                )
+            # Log to Tensorboard
+            step = (i + 1) * self.task_hor
+            self.logger.log_scalar("reward", reward_sum, step)
 
-            print("Rewards obtained:", [sample["reward_sum"] for sample in samples[:self.neval]])
-            traj_obs.extend([sample["obs"] for sample in samples[:self.nrollouts_per_iter]])
-            traj_acs.extend([sample["ac"] for sample in samples[:self.nrollouts_per_iter]])
-            traj_rets.extend([sample["reward_sum"] for sample in samples[:self.neval]])
-            traj_rews.extend([sample["rewards"] for sample in samples[:self.nrollouts_per_iter]])
-            samples = samples[:self.nrollouts_per_iter]
+            for key, metric in metrics.items():
+                self.logger.log_scalar("{}/mean".format(key), metric.mean(), step)
 
-            self.policy.dump_logs(self.logdir, iter_dir)
-            savemat(
-                os.path.join(self.logdir, "logs.mat"),
-                {
-                    "observations": traj_obs,
-                    "actions": traj_acs,
-                    "returns": traj_rets,
-                    "rewards": traj_rews
-                }
-            )
-            # Delete iteration directory if not used
-            if len(os.listdir(iter_dir)) == 0:
-                os.rmdir(iter_dir)
+                for n in range(len(metric)):
+                    self.logger.log_scalar("{}/model{}".format(key, n + 1), metric[n], step)
 
-            if i < self.ntrain_iters - 1:
-                self.policy.train(
-                    [sample["obs"] for sample in samples],
-                    [sample["ac"] for sample in samples],
-                    [sample["rewards"] for sample in samples]
-                )
+            for key, weight in weights.items():
+                self.logger.log_histogram("weight/{}".format(key), weight, step)
+
+            for key, grad in grads.items():
+                self.logger.log_histogram("grad/{}".format(key), grad, step)
+
+
+    def sample_rollout(self):
+        """Sample a rollout.
+
+        Returns:
+            obs (numpy.ndarray): Trajectory of observations.
+            acts (numpy.ndarray): Trajectory of actions.
+            reward_sum (int): Sum of accumulated rewards.
+        """
+        times, rewards = [], []
+        O, A, reward_sum, done = [self.env.reset()], [], 0, False
+
+        self.policy.reset()
+        for t in range(self.task_hor):
+            start = time.time()
+            A.append(self.policy.act(O[t]))
+            times.append(time.time() - start)
+
+            obs, reward, done, info = self.env.step(A[t])
+
+            O.append(obs)
+            reward_sum += reward
+
+            if done:
+                break
+
+        print("Average action selection time: ", np.mean(times))
+        print("Rollout length: ", len(A))
+        print("Cumulative reward: ", reward_sum)
+
+        return np.array(O), np.array(A), reward_sum

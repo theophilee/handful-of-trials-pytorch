@@ -4,21 +4,21 @@ import torch.nn as nn
 from .layers import BootstrapLinear, BootstrapGaussian, Swish
 
 
-ACTIVATIONS = {'relu': nn.ReLU(), 'swish': Swish()}
+ACTIVATIONS = {'relu': nn.ReLU(), 'swish': Swish(), 'tanh': nn.Tanh()}
 TORCH_DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
 
 class BootstrapEnsemble:
     def __init__(self, ensemble_size, in_features, out_features, hid_features, activation,
                  lr, weight_decay):
-        """ Ensemble of bootstrap networks.
+        """ Ensemble of bootstrap model.
 
         Args:
             ensemble_size (int): size of the bootstrap ensemble
             in_features (int): size of each input sample
             out_features (int): size of each output sample
             hid_features (int list): size of each hidden layer, can be empty
-            activation: activation function, one of 'relu', 'swish'
+            activation: activation function, one of 'relu', 'swish', 'tanh'
             lr (float): learning rate for optimizer
             weight_decay (float): weight decay for model parameters
         """
@@ -45,8 +45,9 @@ class BootstrapEnsemble:
 
     def fit_input_stats(self, input):
         # Store data statistics for normalization
-        self.input_mean = torch.mean(input, dim=0, keepdim=True).to(TORCH_DEVICE)
-        self.input_std = torch.std(input, dim=0, keepdim=True).to(TORCH_DEVICE)
+        # TODO how important is input normalization?
+        self.input_mean = torch.mean(input, dim=0, keepdim=True)
+        self.input_std = torch.std(input, dim=0, keepdim=True)
         self.input_std.data[self.input_std.data < 1e-12] = 1.0
 
     def predict(self, input):

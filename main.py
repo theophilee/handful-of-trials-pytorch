@@ -1,4 +1,4 @@
-iport argparse
+import argparse
 
 import torch
 import numpy as np
@@ -9,6 +9,7 @@ import tensorflow as tf
 import env
 
 from controller import MPC
+from policy import Policy
 from experiment import Experiment
 from config import get_config
 
@@ -34,10 +35,13 @@ def main(args):
     cfg = get_config(args.env)
 
     # Model predictive control policy
-    policy = MPC(cfg.mpc_cfg)
+    mpc = MPC(cfg.mpc_cfg)
+
+    # Parameterized reactive policy
+    policy = Policy(**cfg.policy_cfg)
 
     # Run experiment
-    exp = Experiment(policy, args.logdir, cfg.exp_cfg)
+    exp = Experiment(mpc, policy, args.logdir, cfg.exp_cfg)
     exp.run_experiment()
 
 

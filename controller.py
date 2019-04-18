@@ -1,9 +1,8 @@
 import torch
 import numpy as np
-from sklearn.model_selection import train_test_split
 from collections import OrderedDict
 
-from networks import BootstrapEnsemble
+from model import BootstrapEnsemble
 from optimizer import CEMOptimizer
 
 
@@ -27,8 +26,7 @@ class MPC:
             args (DotMap): A DotMap of MPC parameters.
                 .env (gym.env): Environment for which this controller will be used.
                 .plan_hor (int): The planning horizon that will be used in optimization.
-                .num_part (int): Number of particles used for DS, TSinf, TS1, and MM
-                    propagation methods.
+                .num_part (int): Number of particles used for propagation method.
                 .train_epochs (int): Number of epochs of training each time we refit
                     the model.
                 .batch_size (int): Batch size.
@@ -48,7 +46,7 @@ class MPC:
                     is called, can be empty.
 
                 .model_cfg (DotMap): A DotMap of model parameters.
-                    .ensemble_size (int): Number of bootstrap networks.
+                    .ensemble_size (int): Number of bootstrap model.
                     .in_features (int): size of each input sample
                     .out_features (int): size of each output sample
                     .hid_features iterable(int): size of each hidden layer, can be empty
@@ -106,30 +104,32 @@ class MPC:
 
         # Bootstrap ensemble model
         self.model = BootstrapEnsemble(**args.model_cfg)
-        # TODO add dataparallel and device_ids as arguments?
 
     def train(self, obs, acts):
         self.has_been_trained = True
 
-        # Add new data to training set
+        # Preprocess new data
         new_X = np.concatenate([self.obs_preproc(obs[:-1]), acts], axis=1)
         new_Y = self.targ_proc(obs[:-1], obs[1:])
 
+        # Add new data to training set
         self.X = np.concatenate([self.X, new_X])
         self.Y = np.concatenate([self.Y, new_Y])
 
         # Store input statistics for normalization
-        self.model.fit_input_stats(torch.from_numpy(self.X).float())
+        self.model.fit_input_stats(numpy_to_device(self.X))
 
-        # Use 10% of data for validation
-        X_train, X_test, Y_train, Y_test = train_test_split(self.X, self.Y, test_size=0.1)
+        # Record per model MSE and cross-entropy on new data (test set)
+        metrics = OrderedDict()
+        metrics["model/mse/test"], metrics["model/xentropy/test"] = self.model.evaluate(
+            numpy_to_device(new_X), numpy_to_device(new_Y))
 
-        num_train = X_train.shape[0]
-        num_batches = int(np.ceil(num_train / self.batch_size))
-        idxs = np.random.randint(num_train, size=[self.num_nets, num_train])
+        num_examples = self.X.shape[0]
+        num_batches = int(np.ceil(num_examples / self.batch_size))
+        idxs = np.random.randint(num_examples, size=[self.num_nets, num_examples])
 
-        train_mses = np.zeros((self.train_epochs, num_batches, self.num_nets))
-        train_xentropies = np.zeros((self.train_epochs, num_batches, self.num_nets))
+        mses = np.zeros((self.train_epochs, num_batches, self.num_nets))
+        xentropies = np.zeros((self.train_epochs, num_batches, self.num_nets))
 
         # Training loop
         for e in range(self.train_epochs):
@@ -137,18 +137,15 @@ class MPC:
                 batch_idxs = idxs[:, b * self.batch_size: (b + 1) * self.batch_size]
 
                 # Take a gradient step
-                train_mses[e, b], train_xentropies[e, b] = self.model.update(
-                    numpy_to_device(X_train[batch_idxs]),
-                    numpy_to_device(Y_train[batch_idxs]))
+                mses[e, b], xentropies[e, b] = self.model.update(
+                    numpy_to_device(self.X[batch_idxs]),
+                    numpy_to_device(self.Y[batch_idxs]))
 
             np.random.shuffle(idxs)
 
-        # Record per model mean squared error and cross-entropy
-        metrics = OrderedDict()
-        metrics["mse/train"] = train_mses.mean(axis=(0, 1))
-        metrics["xentropy/train"] = train_xentropies.mean(axis=(0, 1))
-        metrics["mse/test"], metrics["xentropy/test"] = self.model.evaluate(
-            numpy_to_device(X_test), numpy_to_device(Y_test))
+        # Record per model mean squared error and cross-entropy on training set
+        metrics["model/mse/train"] = mses.mean(axis=(0, 1))
+        metrics["model/xentropy/train"] = xentropies.mean(axis=(0, 1))
 
         # Record parameters and gradients
         weights, grads = OrderedDict(), OrderedDict()
@@ -168,12 +165,12 @@ class MPC:
             fn()
 
     def act(self, obs):
-        """Returns the action that this controller would take at time t given observation obs.
+        """Returns the action that this controller would take given observation obs.
 
         Arguments:
-            obs: The current observation.
+            obs (1D numpy.ndarray): The current observation.
 
-        Returns: An action (1D numppy.ndarray).
+        Returns: An action (1D numpy.ndarray).
         """
         if not self.has_been_trained:
             return np.random.uniform(self.act_low, self.act_high, self.act_low.shape)

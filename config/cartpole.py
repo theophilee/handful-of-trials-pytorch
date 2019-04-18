@@ -46,12 +46,22 @@ class Config:
         exp_cfg = DotMap({"env": self.env,
                           "task_hor": self.task_hor,
                           "num_rollouts": self.num_rollouts})
-
+        
+        """
         model_cfg = DotMap({"ensemble_size": 5,
                             "in_features": self.in_features,
                             "out_features": self.out_features,
                             "hid_features": [500, 500, 500],
                             "activation": "swish",
+                            "lr": 1e-3,
+                            "weight_decay": 1e-4})
+        """
+
+        model_cfg = DotMap({"ensemble_size": 1,
+                            "in_features": self.in_features,
+                            "out_features": self.out_features,
+                            "hid_features": [200],
+                            "activation": "relu",
                             "lr": 1e-3,
                             "weight_decay": 1e-4})
 

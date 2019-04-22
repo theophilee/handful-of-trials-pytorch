@@ -94,8 +94,6 @@ class Config:
                              "lr": 1e-3,
                              "weight_decay": 0.})
 
-
-
         cfg = DotMap({"exp_cfg": exp_cfg,
                       "mpc_cfg": mpc_cfg,
                       "policy_cfg": policy_cfg})

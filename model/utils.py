@@ -1,7 +1,7 @@
 import tensorflow as tf
 import torch
 
-# TODO use truncnorm from scipy.stats instead of tensorflow, and get rid of tensorflow everywhere
+# TODO use truncnorm from scipy.stats instead of tensorflow, or get rid if this initialization
 def truncated_normal(size, std):
     # This initialization does not exist in cartpole and is important for rapid early training in cartpole.
     # Sample from a Gaussian and reject samples more than two standard deviations away from the mean.

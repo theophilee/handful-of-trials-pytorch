@@ -102,7 +102,16 @@ class Config:
                           "model_cfg": model_cfg,
                           "opt_cfg": opt_cfg})
 
+        policy_cfg = DotMap({"env": self.env,
+                             "hid_features": [200],
+                             "activation": "relu",
+                             "train_epochs": 5,
+                             "batch_size": 32,
+                             "lr": 1e-3,
+                             "weight_decay": 0.})
+
         cfg = DotMap({"exp_cfg": exp_cfg,
-                      "mpc_cfg": mpc_cfg})
+                      "mpc_cfg": mpc_cfg,
+                      "policy_cfg": policy_cfg})
 
         return cfg

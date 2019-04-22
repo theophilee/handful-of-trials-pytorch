@@ -3,12 +3,11 @@ import scipy.stats as stats
 
 
 class CEMOptimizer:
-    def __init__(self, sol_dim, max_iters, popsize, num_elites, cost_function,
-                 upper_bound, lower_bound, epsilon=0.001, alpha=0.25):
+    def __init__(self, max_iters, popsize, num_elites, cost_function, upper_bound,
+                 lower_bound, epsilon=0.001, alpha=0.25):
         """Cross-entropy method optimizer.
 
         Arguments:
-            sol_dim (int): The dimensionality of the problem space
             max_iters (int): The maximum number of iterations to perform during optimization
             popsize (int): The number of candidate solutions to be sampled at every iteration
             num_elites (int): The number of top solutions that will be used to obtain the
@@ -21,25 +20,28 @@ class CEMOptimizer:
                 the next iteration.
                 next_mean = alpha * old_mean + (1 - alpha) * elite_mean
         """
-        self.sol_dim = sol_dim
         self.max_iters = max_iters
         self.popsize = popsize
         self.num_elites = num_elites
         self.cost_function = cost_function
         self.upper_bound, self.lower_bound, = upper_bound, lower_bound
+        self.init_var = np.square(self.upper_bound - self.lower_bound) / 16
+        self.sol_dim = self.init_var.shape[0]
         self.epsilon = epsilon
         self.alpha = alpha
 
         assert num_elites <= popsize, "Number of elites must be at most the population size."
 
-    def obtain_solution(self, init_mean, init_var):
-        """Optimizes the cost function using the provided initial candidate distribution.
+    def obtain_solution(self, init_mean):
+        """ Optimize multiple CEM problems in parallel (parallel cost function computation)
+        using the provided initial candidate distributions.
 
         Arguments:
-            init_mean (np.ndarray): The mean of the initial candidate distribution.
-            init_var (np.ndarray): The variance of the initial candidate distribution.
+            init_mean (2D np.ndarray): The means of the initial candidate distributions of
+                shape (num_problems, sol_dim).
         """
-        mean, var, t = init_mean, init_var, 0
+        mean, var, t = init_mean, self.init_var, 0
+        num_problems = init_mean.shape[0]
         distrib = stats.truncnorm(-2, 2, loc=np.zeros_like(mean), scale=np.ones_like(mean))
 
         while (t < self.max_iters) and np.max(var) > self.epsilon:
@@ -48,17 +50,22 @@ class CEMOptimizer:
                                          np.square((self.upper_bound - mean) / 2))
             var = np.minimum(var, var_upper_bound)
 
-            # Sample population
-            samples = distrib.rvs(size=[self.popsize, self.sol_dim]) * np.sqrt(var) + mean
-            samples = samples.astype(np.float32)
+            # Sample population and reshape it to (num_problems, popsize, sol_dim)
+            samples = distrib.rvs(size=[self.popsize, *init_mean.shape]) * np.sqrt(var) + mean
+            samples = samples.astype(np.float32).transpose(1, 0, 2)
 
-            # Select elites
+            # Compute costs for all problems in parallel of shape (num_problems, popsize)
             costs = self.cost_function(samples)
-            elites = samples[np.argsort(costs)][:self.num_elites]
 
-            # Update distribution
-            new_mean = np.mean(elites, axis=0)
-            new_var = np.var(elites, axis=0)
+            # Select elites for each problem independently
+            elites = []
+            for i in range(num_problems):
+                elites.append(samples[i, np.argsort(costs[i])[:self.num_elites]])
+            elites = np.array(elites)
+
+            # Update distributions
+            new_mean = np.mean(elites, axis=1)
+            new_var = np.var(elites, axis=1)
 
             mean = self.alpha * mean + (1 - self.alpha) * new_mean
             var = self.alpha * var + (1 - self.alpha) * new_var

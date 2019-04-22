@@ -51,7 +51,9 @@ def main(args):
 
     # Run experiment
     exp = Experiment(mpc, policy, args.logdir, args.savedir, cfg.exp_cfg)
-    exp.run_experiment()
+    #exp.run_baseline()
+    exp.run_behavior_cloning()
+    #exp.run_DAgger()
 
 
 if __name__ == "__main__":

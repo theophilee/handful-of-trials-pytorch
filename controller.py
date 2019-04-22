@@ -18,6 +18,10 @@ def numpy_to_device(arr):
     return torch.from_numpy(arr).float().to(TORCH_DEVICE)
 
 
+def numpy_from_device(tensor):
+    return tensor.cpu().data.numpy()
+
+
 class MPC:
     def __init__(self, args):
         """Model predictive controller.
@@ -66,7 +70,9 @@ class MPC:
                     .alpha (float): Controls how much of the previous mean and variance is
                         used for the next iteration.
         """
+        self.env = args.env
         self.act_features = args.env.action_space.shape[0]
+        self.obs_features = args.env.observation_space.shape[0]
         self.act_high, self.act_low = args.env.action_space.high, args.env.action_space.low
         self.plan_hor = args.plan_hor
         self.num_part = args.num_part
@@ -86,7 +92,6 @@ class MPC:
 
         # Action sequence optimizer
         self.optimizer = CEMOptimizer(
-            sol_dim=self.plan_hor * self.act_features,
             lower_bound=np.tile(self.act_low, self.plan_hor),
             upper_bound=np.tile(self.act_high, self.plan_hor),
             cost_function=self._compile_cost,
@@ -95,8 +100,8 @@ class MPC:
 
         # Controller state variables
         self.has_been_trained = False
-        self.prev_plan = np.zeros(self.plan_hor * self.act_features)
-        self.init_var = np.tile(np.square(self.act_high - self.act_low) / 16, self.plan_hor)
+        self.cur_obs = None
+        self.prev_plan = None
 
         # Dataset to train model
         self.X = np.empty((0, args.model_cfg.in_features))
@@ -150,8 +155,8 @@ class MPC:
         # Record parameters and gradients
         weights, grads = OrderedDict(), OrderedDict()
         for name, param in self.model.net.named_parameters():
-            weights[name] = param.clone().cpu().data.numpy()
-            grads[name] = param.grad.clone().cpu().data.numpy()
+            weights[name] = numpy_from_device(param.clone())
+            grads[name] = numpy_from_device(param.grad.clone())
 
         return metrics, weights, grads
 
@@ -160,109 +165,206 @@ class MPC:
 
         Returns: None.
         """
-        self.prev_plan = np.zeros(self.plan_hor * self.act_features)
+        self.prev_plan = np.zeros((1, self.plan_hor * self.act_features))
         for fn in self.reset_fns:
             fn()
 
     def act(self, obs):
-        """Returns the action that this controller would take given observation obs.
+        """Returns the action that this controller would take for a single observation obs.
 
         Arguments:
-            obs (1D numpy.ndarray): The current observation.
+            obs (1D numpy.ndarray): Observation.
 
-        Returns: An action (1D numpy.ndarray).
+        Returns: Action (1D numpy.ndarray).
         """
         if not self.has_been_trained:
             return np.random.uniform(self.act_low, self.act_high, self.act_low.shape)
+
+        return self.act_parallel(obs[np.newaxis])[0]
+
+    def act_parallel(self, obs):
+        """Returns the action that this controller would take for each of the observations
+        in obs. Used to sample multiple rollouts in parallel.
+
+        Arguments:
+            obs (2D numpy.ndarray): Observations (num_obs, obs_features).
+
+        Returns: Actions (2D numpy.ndarray).
+        """
+        num_obs = obs.shape[0]
 
         # Store current observation for self._compile_cost() called by
         # self.optimizer.obtain_solution()
         self.cur_obs = obs
 
         # Compute action plan over time horizon
-        plan = self.optimizer.obtain_solution(self.prev_plan, self.init_var)
+        plan = self.optimizer.obtain_solution(self.prev_plan)
 
         # Store plan to initialize next iteration
-        self.prev_plan = np.concatenate([plan[self.act_features:], np.zeros(self.act_features)])
+        self.prev_plan = np.concatenate([plan[:, self.act_features:],
+                                         np.zeros((num_obs, self.act_features))],
+                                        axis=1)
 
         # Return the first action
-        act = plan[:self.act_features]
-        return act
+        acts = plan[:, :self.act_features]
+        return acts
 
     def label(self, obs):
         """Returns the action that this controller would take for each of the observations
-            in obs.
+        in obs. Compared to act_parallel(), this function is not designed to be called
+        multiple times sequentially to generate a rollout, but only once to label
+        observations taken by another policy with the actions that this controller would
+        take. This function does not use self.prev_plan (plans are initialized from scratch
+        and not stored for subsequent calls).
 
         Arguments:
             obs (2D numpy.ndarray): Observations.
 
         Returns: Actions (2D numpy.ndarray).
         """
-        # TODO could parallellize action labeling
-        acts = []
+        num_obs = obs.shape[0]
 
-        for ob in obs:
-            # Be careful: cannot label() will mess with act() if interleaved!
-            self.cur_obs = ob
+        # Store current observation for self._compile_cost() called by
+        # self.optimizer.obtain_solution()
+        self.cur_obs = obs
 
-            # Compute action plan over time horizon
-            plan = self.optimizer.obtain_solution(np.zeros(self.plan_hor * self.act_features),
-                                                  self.init_var)
+        # Compute action plan over time horizon
+        init_mean = np.zeros((num_obs, self.plan_hor * self.act_features))
+        plan = self.optimizer.obtain_solution(init_mean)
 
-            # Store the first action
-            acts.append(plan[:self.act_features])
+        # Return the first action
+        acts = plan[:, :self.act_features]
+        return acts
 
-        return np.array(acts)
+    @torch.no_grad()
+    def sample_imaginary_rollouts(self, actor, task_hor, num_rollouts):
+        """Sample multiple rollouts generated by a given actor under the learned dynamics in
+        parallel.
+
+        Argument:
+            actor (str): One of 'mpc', 'policy'.
+            num_rollouts (int): Number of rollouts to sample.
+            task_hor (int): Length of rollouts.
+
+        Returns:
+            obs (3D numpy.ndarray): Trajectories of observations.
+            acts (3D numpy.ndarray): Trajectories of actions.
+        """
+        assert actor in ['mpc', 'policy']
+
+        # We use the environment only for its start state distribution
+        O = [np.array([self.env.reset() for _ in range(num_rollouts)])]
+        A = []
+
+        if actor == 'mpc':
+            self.prev_plan = np.zeros((num_rollouts, self.plan_hor * self.act_features))
+
+        for t in range(task_hor):
+            # Compute next actions
+            if actor == 'mpc':
+                # This operation is the main computational bottleneck
+                A.append(self.act_parallel(O[t]))
+            else:
+                raise NotImplementedError
+
+            # Predict next observations by averaging predictions of bootstrap ensemble model
+            # TODO split rollouts among models in ensemble instead of averaging?
+            obs = self._predict_next_obs_average(numpy_to_device(O[t]),
+                                                 numpy_to_device(A[t]))
+
+            O.append(numpy_from_device(obs))
+
+        return np.array(O)[:-1], np.array(A)
 
     @torch.no_grad()
     def _compile_cost(self, plans):
-        num_plans = plans.shape[0]
-
         # TODO transfer CEM optimizer to GPU?
-        # Reshape plans for parallel compute
-        # 1 - (num_plans, plan_hor * act_features)
-        # 2 - (num_plans, plan_hor, act_features)
-        # 3 - (plan_hor, num_plans, act_features)
-        # 4 - (plan_hor, num_plans, num_part, act_features)
-        # 5 - (plan_hor, num_plans * num_part, act_features)
+        num_obs, num_plans = plans.shape[:2]
+
+        # Reshape plans for parallel computation
+        # 1 - (num_obs, num_plans, plan_hor * act_features)
+        # 2 - (num_obs, num_plans, plan_hor, act_features)
+        # 3 - (plan_hor, num_obs, num_plans, act_features)
+        # 4 - (plan_hor, num_obs, num_plans, num_part, act_features)
+        # 5 - (plan_hor, num_obs * num_plans * num_part, act_features)
         plans = numpy_to_device(plans)
-        plans = plans.view(-1, self.plan_hor, self.act_features)
-        plans = plans.transpose(0, 1)
-        plans = plans.unsqueeze(-2).expand(-1, -1, self.num_part, -1)
-        plans = plans.contiguous().view(self.plan_hor, -1, self.act_features)
+        plans = plans.view(num_obs, num_plans, self.plan_hor, self.act_features)
+        plans = plans.permute(2, 0, 1, 3)
+        plans = plans.unsqueeze(-2).expand(-1, -1, -1, self.num_part, -1).contiguous()
+        plans = plans.view(self.plan_hor, -1, self.act_features)
 
-        # Reshape current observation for parallel compute
-        # 1 - (obs_features)
-        # 2 - (num_plans * num_part, obs_features)
+        # Reshape observations for parallel computation
+        # 1 - (num_obs, obs_features)
+        # 2 - (num_obs * num_plans * num_part, obs_features)
         obs = numpy_to_device(self.cur_obs)
-        obs = obs.unsqueeze(0).expand(num_plans * self.num_part, -1)
+        obs = obs.repeat(num_plans * self.num_part, 1)
 
-        # Fill cost matrix
-        costs = np.zeros((num_plans, self.num_part))
+        # Compute costs in parallel
+        # Across starting observations, plans per observation and particles per plan
+        #costs = np.zeros(num_obs * num_plans * self.num_part)
+        costs = np.zeros((num_obs, num_plans, self.num_part))
 
         for t in range(self.plan_hor):
             acts = plans[t]
 
             # Predict next observation
-            next_obs = self._predict_next_obs(obs, acts)
+            next_obs = self._predict_next_obs_divide(obs, acts)
 
-            # Compute cost of transition
+            # Compute cost of transitions
             cost = self.get_cost_obs(next_obs) + self.get_cost_acts(acts)
-            cost = cost.view(num_plans, self.num_part)
-            costs += cost.cpu().numpy()
+            cost = cost.view(num_obs, num_plans, self.num_part)
+            costs += numpy_from_device(cost)
 
             obs = next_obs
 
+        # Average cost over particles
+        costs = costs.mean(axis=-1)
+
         # Replace nan with high cost
-        costs[costs != costs] = 1e6
+        #costs[costs != costs] = 1e6
 
-        return costs.mean(axis=1)
+        return costs
 
-    def _predict_next_obs(self, obs, acts):
+    def _predict_next_obs_average(self, obs, acts):
+        """Predict next observation, this function is called when sampling rollouts under
+        the model wih sample_imaginary_rollouts(), it averages predictions of models in
+        ensemble.
+
+        Arguments:
+            obs (2D numpy.ndarray): Observations.
+
+        Returns: Actions (2D numpy.ndarray).
+        """
         # Preprocess observations
         proc_obs = self.obs_preproc(obs)
 
-        # Reshape observations and actions
+        # Duplicate observations and actions to be processed by ensemble
+        proc_obs = proc_obs.repeat(self.num_nets, 1, 1)
+        acts = acts.repeat(self.num_nets, 1, 1)
+
+        # Predict next observations
+        mean, logvar = self.model.predict(torch.cat((proc_obs, acts), dim=-1))
+        preds = mean + torch.randn_like(mean, device=TORCH_DEVICE) * logvar.exp().sqrt()
+
+        # Average ensemble predictions
+        avg_pred = preds.mean(dim=0)
+
+        # Postprocess predictions
+        return self.pred_postproc(obs, avg_pred)
+
+    def _predict_next_obs_divide(self, obs, acts):
+        """Predict next observation, this function is called when we propagate particles
+         with _compile_costs(), it divides predictions among models in the ensemble.
+
+        Arguments:
+            obs (2D numpy.ndarray): Observations.
+
+        Returns: Actions (2D numpy.ndarray).
+        """
+        # Preprocess observations
+        proc_obs = self.obs_preproc(obs)
+
+        # Divide particles among models in ensemble
         proc_obs = self._to_3D(proc_obs)
         acts = self._to_3D(acts)
 
@@ -278,9 +380,9 @@ class MPC:
 
     def _to_3D(self, input):
         # Reshape matrix to be processed by bootstrap ensemble model
-        # 1 - (num_plans * num_part, num_features)
-        # 2 - (num_plans, num_nets, num_parts / num_nets, num_features)
-        # 3 - (num_nets, num_plans * (num_parts / num_nets), num_features)
+        # 1 - (x * num_part, num_features)
+        # 2 - (x, num_nets, num_parts / num_nets, num_features)
+        # 3 - (num_nets, x * (num_parts / num_nets), num_features)
         num_features = input.shape[-1]
         reshaped = input.view(-1, self.num_nets, self.num_part // self.num_nets, num_features)
         reshaped = reshaped.transpose(0, 1).contiguous().view(self.num_nets, -1, num_features)
@@ -288,9 +390,9 @@ class MPC:
 
     def _to_2D(self, input):
         # Reshape 3D tensor processed by bootstrap ensemble model to matrix
-        # 1 - (num_nets, num_plans * (num_parts / num_nets), num_features)
-        # 2 - (num_nets, num_plans, num_part / num_nets, num_features)
-        # 3 - (num_plans * num_part, num_features)
+        # 1 - (num_nets, x * (num_parts / num_nets), num_features)
+        # 2 - (num_nets, x, num_part / num_nets, num_features)
+        # 3 - (x * num_part, num_features)
         num_features = input.shape[-1]
         reshaped = input.view(self.num_nets, -1, self.num_part // self.num_nets, num_features)
         reshaped = reshaped.transpose(0, 1).contiguous().view(-1, num_features)

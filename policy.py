@@ -33,22 +33,18 @@ class Policy:
             .lr (float): Learning rate for optimizer.
             .weight_decay (float): Weight decay for policy parameters.
         """
+        # TODO add observation pre-processing as for model?
         self.obs_features = env.observation_space.shape[0]
         self.act_features = env.action_space.shape[0]
         self.act_high, self.act_low = env.action_space.high, env.action_space.low
         self.train_epochs = train_epochs
         self.batch_size = batch_size
-        self.has_been_trained = False
 
         self.net = self._make_network(self.obs_features, self.act_features,
                                       hid_features, activation).to(TORCH_DEVICE)
 
         self.optim = Adam(self.net.parameters(), lr=lr, weight_decay=weight_decay)
         self.criterion = nn.MSELoss()
-
-        # Dataset to train policy
-        self.X = torch.empty((0, self.obs_features))
-        self.Y = torch.empty((0, self.act_features))
         
     
     def _make_network(self, obs_features, act_features, hid_features, activation):
@@ -68,22 +64,12 @@ class Policy:
 
 
     def train(self, obs, acts):
-        self.has_been_trained = True
-
-        new_X = torch.from_numpy(obs).float()
-        new_Y = torch.from_numpy(acts).float()
-
-        # Add new data to training set
-        self.X = torch.cat((self.X, new_X))
-        self.Y = torch.cat((self.Y, new_Y))
+        # Create training set
+        self.X = torch.from_numpy(obs).float()
+        self.Y = torch.from_numpy(acts).float()
 
         # Compute input statistics for normalization
         self._fit_input_stats(self.X)
-
-        # Record MSE on new data (test set)
-        metrics = OrderedDict()
-        metrics["policy/mse/test"] = self.criterion(self.net(new_X.to(TORCH_DEVICE)),
-                                             new_Y.to(TORCH_DEVICE))
 
         dataset = TensorDataset(self.X, self.Y)
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
@@ -102,7 +88,8 @@ class Policy:
                 self.optim.step()
 
         # Record MSE in training set
-        metrics["policy/mse/train"] = mse / (self.train_epochs * num_batches)
+        metrics = OrderedDict()
+        metrics["policy/mse"] = mse / (self.train_epochs * num_batches)
 
         return metrics
 
@@ -115,9 +102,6 @@ class Policy:
 
         Returns: An action (1D numpy.ndarray).
         """
-        if not self.has_been_trained:
-            return np.random.uniform(self.act_low, self.act_high, self.act_low.shape)
-
         with torch.no_grad():
             return numpy_from_device(self.net(numpy_to_device(obs)))
 

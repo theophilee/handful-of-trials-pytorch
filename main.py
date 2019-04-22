@@ -52,8 +52,8 @@ def main(args):
     # Run experiment
     exp = Experiment(mpc, policy, args.logdir, args.savedir, cfg.exp_cfg)
     #exp.run_baseline()
-    exp.run_behavior_cloning()
-    #exp.run_DAgger()
+    exp.run_debug()
+    #exp.run_experiment(algo='behavior_cloning')
 
 
 if __name__ == "__main__":

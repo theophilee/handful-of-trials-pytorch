@@ -46,7 +46,8 @@ class Config:
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,
                           "task_hor": self.task_hor,
-                          "num_rollouts": self.num_rollouts})
+                          "num_rollouts": self.num_rollouts,
+                          "num_imagined_rollouts": 2})
         
         """
         model_cfg = DotMap({"ensemble_size": 5,
@@ -89,7 +90,7 @@ class Config:
         policy_cfg = DotMap({"env": self.env,
                              "hid_features": [200],
                              "activation": "relu",
-                             "train_epochs": 5,
+                             "train_epochs": 20,
                              "batch_size": 32,
                              "lr": 1e-3,
                              "weight_decay": 0.})

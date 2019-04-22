@@ -45,7 +45,9 @@ class Policy:
 
         self.optim = Adam(self.net.parameters(), lr=lr, weight_decay=weight_decay)
         self.criterion = nn.MSELoss()
-        
+
+        self.X = torch.empty((0, self.obs_features))
+        self.Y = torch.empty((0, self.act_features))
     
     def _make_network(self, obs_features, act_features, hid_features, activation):
         # TODO might need to add an output activation
@@ -62,23 +64,36 @@ class Policy:
         else:
             nn.Sequential(nn.Linear(obs_features, act_features))
 
+    def reset_training_set(self):
+        # Reset dataset used to train policy (start of inner loop iteration)
+        self.X = torch.empty((0, self.obs_features))
+        self.Y = torch.empty((0, self.act_features))
 
     def train(self, obs, acts):
-        # Create training set
-        self.X = torch.from_numpy(obs).float()
-        self.Y = torch.from_numpy(acts).float()
+        new_X = torch.from_numpy(obs).float()
+        new_Y = torch.from_numpy(acts).float()
+
+        # Add new data to training set
+        self.X = torch.cat((self.X, new_X))
+        self.Y = torch.cat((self.Y, new_Y))
 
         # Compute input statistics for normalization
         self._fit_input_stats(self.X)
+
+        # Record MSE on new data (test set)
+        metrics = OrderedDict()
+        metrics["policy/mse/test"] = self.criterion(self.net(new_X.to(TORCH_DEVICE)),
+                                                    new_Y.to(TORCH_DEVICE)).item()
 
         dataset = TensorDataset(self.X, self.Y)
         loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
         num_batches = len(loader)
 
-        mse = 0
+        train_mses = []
         for e in range(self.train_epochs):
+            mse = 0
+
             for (X, Y) in loader:
-                # Mean squared error between policy actions and expert actions
                 loss = self.criterion(self.net(X.to(TORCH_DEVICE)), Y.to(TORCH_DEVICE))
                 mse += loss.item()
 
@@ -87,12 +102,14 @@ class Policy:
                 loss.backward()
                 self.optim.step()
 
-        # Record MSE in training set
-        metrics = OrderedDict()
-        metrics["policy/mse"] = mse / (self.train_epochs * num_batches)
+            train_mses.append(mse / len(loader))
+
+        # Record MSE on training set for each epoch
+        metrics["policy/mse/train"] = train_mses
+        #for i, mse in enumerate(train_mses):
+        #    metrics["policy/mse/train/epoch_{}".format(i + 1)] = mse
 
         return metrics
-
 
     def act(self, obs):
         """Returns the action that this policy would take given observation obs.

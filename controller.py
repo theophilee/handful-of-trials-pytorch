@@ -1,6 +1,14 @@
 import torch
+import copy
 import numpy as np
 from collections import OrderedDict
+from functools import partial
+
+from torch.multiprocessing import Pool, set_start_method
+try:
+    set_start_method('spawn')
+except RuntimeError:
+    pass
 
 from model import BootstrapEnsemble
 from optimizer import CEMOptimizer
@@ -42,10 +50,8 @@ class MPC:
                 .targ_proc (func): A function which takes current observations and next
                     observations and returns the array of targetets (so that the model
                     learns the mapping obs -> targ_proc(obs, next_obs)).
-                .get_cost_obs (func): A function which computes the cost of a batch of
-                    observations.
-                .get_cost_acts (func): A function which computes the cost of a batch of
-                    actions.
+                .get_cost (func): A function which computes the cost of a batch of
+                    transitions.
                 .reset_fns (list[func]): A list of function to be called when MPC.reset()
                     is called, can be empty.
 
@@ -83,8 +89,7 @@ class MPC:
         self.obs_preproc = args.obs_preproc
         self.pred_postproc = args.pred_postproc
         self.targ_proc = args.targ_proc
-        self.get_cost_obs = args.get_cost_obs
-        self.get_cost_acts = args.get_cost_acts
+        self.get_cost = args.get_cost
         self.reset_fns = args.reset_fns
 
         # Check arguments
@@ -94,13 +99,11 @@ class MPC:
         self.optimizer = CEMOptimizer(
             lower_bound=np.tile(self.act_low, self.plan_hor),
             upper_bound=np.tile(self.act_high, self.plan_hor),
-            cost_function=self._compile_cost,
             **args.opt_cfg
         )
 
         # Controller state variables
         self.has_been_trained = False
-        self.cur_obs = None
         self.prev_plan = None
 
         # Dataset to train model
@@ -169,6 +172,28 @@ class MPC:
         for fn in self.reset_fns:
             fn()
 
+    def act_true_dynamics(self, env):
+        """Returns the action that this controller would take for the current observation of
+        environment env, using copies of env to generate CEM rollouts.
+
+        Arguments:
+            env (gym.env): Gym environment.
+
+        Returns: Action (1D numpy.ndarray).
+        """
+        # Compute action plan over time horizon
+        cost_function = partial(self._compile_cost_true_dynamics, env=env)
+        plan = self.optimizer.obtain_solution(self.prev_plan, cost_function)
+
+        # Store plan to initialize next iteration
+        self.prev_plan = np.concatenate([plan[:, self.act_features:],
+                                         np.zeros((1, self.act_features))],
+                                        axis=1)
+
+        # Return the first action
+        act = plan[0, :self.act_features]
+        return act
+
     def act(self, obs):
         """Returns the action that this controller would take for a single observation obs.
 
@@ -191,18 +216,13 @@ class MPC:
 
         Returns: Actions (2D numpy.ndarray).
         """
-        num_obs = obs.shape[0]
-
-        # Store current observation for self._compile_cost() called by
-        # self.optimizer.obtain_solution()
-        self.cur_obs = obs
-
         # Compute action plan over time horizon
-        plan = self.optimizer.obtain_solution(self.prev_plan)
+        cost_function = partial(self._compile_cost, cur_obs=obs)
+        plan = self.optimizer.obtain_solution(self.prev_plan, cost_function)
 
         # Store plan to initialize next iteration
         self.prev_plan = np.concatenate([plan[:, self.act_features:],
-                                         np.zeros((num_obs, self.act_features))],
+                                         np.zeros((obs.shape[0], self.act_features))],
                                         axis=1)
 
         # Return the first action
@@ -218,19 +238,14 @@ class MPC:
         and not stored for subsequent calls).
 
         Arguments:
-            obs (2D numpy.ndarray): Observations.
+            obs (2D numpy.ndarray): Observations (num_obs, obs_features).
 
         Returns: Actions (2D numpy.ndarray).
         """
-        num_obs = obs.shape[0]
-
-        # Store current observation for self._compile_cost() called by
-        # self.optimizer.obtain_solution()
-        self.cur_obs = obs
-
         # Compute action plan over time horizon
-        init_mean = np.zeros((num_obs, self.plan_hor * self.act_features))
-        plan = self.optimizer.obtain_solution(init_mean)
+        init_mean = np.zeros((obs.shape[0], self.plan_hor * self.act_features))
+        cost_function = partial(self._compile_cost, cur_obs=obs)
+        plan = self.optimizer.obtain_solution(init_mean, cost_function)
 
         # Return the first action
         acts = plan[:, :self.act_features]
@@ -269,6 +284,7 @@ class MPC:
 
             # Predict next observations by averaging predictions of bootstrap ensemble model
             # TODO split rollouts among models in ensemble instead of averaging?
+            # or use different model at every step?
             obs = self._predict_next_obs_average(numpy_to_device(O[t]),
                                                  numpy_to_device(A[t]))
 
@@ -277,7 +293,19 @@ class MPC:
         return np.array(O)[:-1], np.array(A)
 
     @torch.no_grad()
-    def _compile_cost(self, plans):
+    def _compile_cost(self, plans, cur_obs):
+        """Compute cost of plans (sequences of actions) starting at observations in
+        cur_obs under the learned dynamics.
+
+       Argument:
+            plans (3D numpy.ndarray): Sequences of actions of shape
+                (num_obs, num_plans, plan_hor * act_features).
+            cur_obs (2D numpy.ndarray): Starting observations to compile costs of shape
+                (num_obs, obs_features).
+
+       Returns:
+           costs (2D numpy.ndarray): Cost of plans of shape (num_obs, num_plans).
+       """
         # TODO transfer CEM optimizer to GPU?
         num_obs, num_plans = plans.shape[:2]
 
@@ -296,12 +324,11 @@ class MPC:
         # Reshape observations for parallel computation
         # 1 - (num_obs, obs_features)
         # 2 - (num_obs * num_plans * num_part, obs_features)
-        obs = numpy_to_device(self.cur_obs)
+        obs = numpy_to_device(cur_obs)
         obs = obs.repeat(num_plans * self.num_part, 1)
 
         # Compute costs in parallel
         # Across starting observations, plans per observation and particles per plan
-        #costs = np.zeros(num_obs * num_plans * self.num_part)
         costs = np.zeros((num_obs, num_plans, self.num_part))
 
         for t in range(self.plan_hor):
@@ -311,7 +338,7 @@ class MPC:
             next_obs = self._predict_next_obs_divide(obs, acts)
 
             # Compute cost of transitions
-            cost = self.get_cost_obs(next_obs) + self.get_cost_acts(acts)
+            cost = self.get_cost(obs, acts, next_obs)
             cost = cost.view(num_obs, num_plans, self.num_part)
             costs += numpy_from_device(cost)
 
@@ -324,6 +351,43 @@ class MPC:
         #costs[costs != costs] = 1e6
 
         return costs
+
+    def _compile_cost_true_dynamics(self, plans, env):
+        """Compute cost of plans (sequences of actions) starting at current observation
+        of environment env under the true dynamics, using copies of env to generate CEM
+        rollouts.
+
+        Argument:
+            plans (3D numpy.ndarray): Sequences of actions of shape
+               (1, num_plans, plan_hor * act_features).
+            env (gym.env): Gym environment.
+
+        Returns:
+          costs (2D numpy.ndarray): Cost of plans of shape (1, num_plans).
+        """
+        # TODO use multiple particles to evaluate plans?
+        plans = [p.reshape(self.plan_hor, self.act_features) for p in plans[0]]
+        eval_fn = partial(self._eval_plan, env=env)
+
+        # Evaluate plans
+        # TODO parallellize plan evaluation with multi-threading?
+        # TODO why so SLOW? how to get faster access to true dynamics?
+        costs = [eval_fn(plan) for plan in plans]
+        #pool = Pool(16)
+        #costs = pool.map(eval_fn, plans)
+
+        return np.array(costs)[np.newaxis]
+
+    def _eval_plan(self, plan, env):
+        """Compute cost of plan from current observation of env using true dynamics.
+        """
+        env_copy = copy.deepcopy(env)
+        total_cost = 0
+        for act in plan:
+            _, reward, _, _ = env_copy.step(act)
+            total_cost -= reward
+
+        return total_cost
 
     def _predict_next_obs_average(self, obs, acts):
         """Predict next observation, this function is called when sampling rollouts under

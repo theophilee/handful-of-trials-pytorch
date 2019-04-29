@@ -6,10 +6,9 @@ from dotmap import DotMap
 
 class Config:
     def __init__(self):
-        self.env = gym.make("MBRLCartpole-v0")
+        self.env = gym.make("MyCartpole-v0")
         self.task_hor = 200
-        #self.num_rollouts = 15
-        self.num_rollouts = 50
+        self.num_rollouts = 15
         self.in_features, self.out_features = 6, 4
 
         self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -29,15 +28,14 @@ class Config:
     def targ_proc(self, obs, next_obs):
         return next_obs - obs
 
-    def get_cost_obs(self, obs):
-        ee_pos = self.get_ee_pos(obs)
+    def get_cost(self, obs, act, next_obs):
+        ee_pos = self.get_ee_pos(next_obs)
         ee_pos -= self.ee_sub
         ee_pos = ee_pos ** 2
         ee_pos = -ee_pos.sum(dim=1)
-        return -(ee_pos / (0.6 ** 2)).exp()
-
-    def get_cost_acts(self, acts):
-        return 0.01 * (acts ** 2).sum(dim=1)
+        cost_obs = -(ee_pos / (0.6 ** 2)).exp()
+        cost_act = 0.01 * (act ** 2).sum(dim=1)
+        return cost_obs + cost_act
 
     def get_ee_pos(self, obs):
         x0, theta = obs[:, :1], obs[:, 1:2]
@@ -48,16 +46,6 @@ class Config:
                           "task_hor": self.task_hor,
                           "num_rollouts": self.num_rollouts,
                           "num_imagined_rollouts": 2})
-        
-        """
-        model_cfg = DotMap({"ensemble_size": 5,
-                            "in_features": self.in_features,
-                            "out_features": self.out_features,
-                            "hid_features": [500, 500, 500],
-                            "activation": "swish",
-                            "lr": 1e-3,
-                            "weight_decay": 1e-4})
-        """
 
         model_cfg = DotMap({"ensemble_size": 1,
                             "in_features": self.in_features,
@@ -81,8 +69,7 @@ class Config:
                           "obs_preproc": self.obs_preproc,
                           "pred_postproc": self.pred_postproc,
                           "targ_proc": self.targ_proc,
-                          "get_cost_obs": self.get_cost_obs,
-                          "get_cost_acts": self.get_cost_acts,
+                          "get_cost": self.get_cost,
                           "reset_fns": [],
                           "model_cfg": model_cfg,
                           "opt_cfg": opt_cfg})

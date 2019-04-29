@@ -1,9 +1,18 @@
 import os
 import time
 import torch
+import copy
 import numpy as np
 
 from utils import Logger
+
+
+def print_rollout_stats(obs, acts, reward_sum):
+    print("Cumulative reward ", reward_sum)
+    print("Action min {}, max {}, mean {}, std {}".format(
+        acts.min(), acts.max(), acts.mean(), acts.std()))
+    print("Obs min {}, max {}, mean {}, std {}".format(
+        obs.min(), obs.max(), obs.mean(), obs.std()))
 
 
 class Experiment:
@@ -16,7 +25,7 @@ class Experiment:
             policy (Policy): Parameterized reactive policy to be trained by
                 imitation learning on model-based controller.
             logdir: Log directory for Tensorboard.
-            savedir:
+            savedir: Save directory.
             args (DotMap): A DotMap of experiment parameters.
                 .env: (OpenAI gym environment) The environment for this agent.
                 .task_hor (int): Task horizon.
@@ -31,14 +40,15 @@ class Experiment:
         self.num_rollouts = args.num_rollouts
         self.num_imagined_rollouts = args.num_imagined_rollouts
 
+        self.savedir = savedir
         self.path_mpc = os.path.join(savedir, 'mpc.pth')
         self.path_policy = os.path.join(savedir, 'policy.pth')
 
         # Tensorboard summary writer
         self.logger = Logger(logdir)
 
-    def run_baseline(self):
-        """Simple model predictive control baseline (no parameterized policy).
+    def run_mpc_baseline(self):
+        """Model predictive control baseline (no parameterized policy).
         """
         # Initial random rollout
         obs, acts, reward_sum = self.sample_rollout(actor='mpc')
@@ -49,32 +59,67 @@ class Experiment:
             print()
             print("Starting training iteration %d." % (i + 1))
 
-            # Sample rollout from mpc
-            obs_mpc, acts_mpc, reward_sum_mpc = self.sample_rollout(actor='mpc')
+            # Sample rollout using mpc
+            obs, acts, reward_sum = self.sample_rollout(actor='mpc')
+            print_rollout_stats(obs, acts, reward_sum)
 
             # Train model
-            metrics_model, weights_model, grads_model = self.mpc.train(obs_mpc, acts_mpc)
-
-            print("MPC cumulative reward ", reward_sum_mpc)
-            print("MPC action min {}, max {}, mean {}, std {}".format(
-                acts_mpc.min(), acts_mpc.max(), acts_mpc.mean(), acts_mpc.std()))
+            metrics, weights, grads = self.mpc.train(obs, acts)
 
             # Log to Tensorboard
             step = (i + 1) * self.task_hor
-            self.logger.log_scalar("reward/mpc", reward_sum_mpc, step)
+            self.logger.log_scalar("reward/mpc", reward_sum, step)
 
-            for key, metric in metrics_model.items():
+            for key, metric in metrics.items():
                 self.logger.log_scalar("{}/mean".format(key), metric.mean(), step)
             #    for n in range(len(metric)):
             #        self.logger.log_scalar("{}/model{}".format(key, n + 1), metric[n], step)
 
-            # for key, weight in weights_model.items():
-            #   self.logger.log_histogram("weight/{}".format(key), weight, step)
-            # for key, grad in grads_model.items():
-            #   self.logger.log_histogram("grad/{}".format(key), grad, step)
+            #for key, weight in weights.items():
+            #    self.logger.log_histogram("weight/{}".format(key), weight, step)
+            #for key, grad in grads.items():
+            #    self.logger.log_histogram("grad/{}".format(key), grad, step)
 
             # Save model
             torch.save(self.mpc, self.path_mpc)
+
+    def run_expert(self):
+        """Model predictive control using true dynamics (expert demonstration).
+        """
+        # TODO super slow -> how to parallellize true dynamics env.step()?
+        # Sample rollout using mpc with true dynamics
+        obs, acts, reward_sum = self.sample_rollout(actor='mpc_true_dynamics')
+        print_rollout_stats(obs, acts, reward_sum)
+
+        # Save expert demonstration
+        np.save(os.path.join(self.savedir, 'expert_obs'), obs)
+        np.save(os.path.join(self.savedir, 'expert_acts'), acts)
+
+    def run_debug(self):
+        """Train behaviour cloning or DAgger in a simpler non-iterative setting to get a feel
+        for it and get hyper-parameters right. Imitate fixed nearly optimal policy (e.g
+        trained controller).
+        """
+        # Restore model
+        self.mpc = torch.load(self.path_mpc)
+
+        # Training loop
+        for i in range(self.num_rollouts):
+            print()
+            print("Starting training iteration %d." % (i + 1))
+
+            # Sample rollout from mpc
+            obs_mpc, acts_mpc, reward_sum_mpc = self.sample_rollout(actor='mpc')
+            print_rollout_stats(obs_mpc, acts_mpc, reward_sum_mpc)
+
+            # Train parameterized policy by behavior cloning
+            metrics_policy = self.policy.train(obs_mpc[:-1], acts_mpc)
+            print("Imitation learning test error", metrics_policy["policy/mse/test"])
+            print("Imitation learning training error", metrics_policy["policy/mse/train"])
+
+            # Sample rollout from parameterized policy for evaluation
+            obs_policy, acts_policy, reward_sum_policy = self.sample_rollout(actor='policy')
+            print_rollout_stats(obs_policy, acts_policy, reward_sum_policy)
 
     def run_experiment(self, algo):
         """Learn parameterized policy by behavior cloning on trajectories generated by
@@ -152,52 +197,21 @@ class Experiment:
             for key, metric in metrics_model.items():
                 self.logger.log_scalar("{}/mean".format(key), metric.mean(), step)
 
-    def run_debug(self):
-        """Train behaviour cloning / DAgger in a simpler non-iterative setting to get a feel
-        for it and get hyper-parameters right. Imitate fixed nearly optimal policy (e.g
-        trained controller).
-        """
-        # Restore model
-        self.mpc = torch.load(self.path_mpc)
-
-        # Training loop
-        for i in range(self.num_rollouts):
-            print()
-            print("Starting training iteration %d." % (i + 1))
-
-            # Sample rollout from mpc
-            obs_mpc, acts_mpc, reward_sum_mpc = self.sample_rollout(actor='mpc')
-            print("MPC cumulative reward ", reward_sum_mpc)
-            print("MPC rollout act min {}, max {}, mean {}, std {}".format(
-                acts_mpc.min(), acts_mpc.max(), acts_mpc.mean(), acts_mpc.std()))
-
-            # Train parameterized policy by behavior cloning
-            metrics_policy = self.policy.train(obs_mpc[:-1], acts_mpc)
-            print("Imitation learning test error", metrics_policy["policy/mse/test"])
-            print("Imitation learning training error", metrics_policy["policy/mse/train"])
-
-            # Sample rollout from parameterized policy for evaluation
-            obs_policy, acts_policy, reward_sum_policy = self.sample_rollout(actor='policy')
-            print("Policy cumulative reward ", reward_sum_policy)
-            print("Policy rollout act min {}, max {}, mean {}, std {}".format(
-                acts_policy.min(), acts_policy.max(), acts_policy.mean(), acts_policy.std()))
-
-
     def sample_rollout(self, actor):
         """Sample a rollout generated by a given actor in the environment.
 
         Argument:
-            actor (str): One of 'mpc', 'policy'.
+            actor (str): One of 'mpc', 'policy', 'mpc_true_dynamics'.
 
         Returns:
             obs (1D numpy.ndarray): Trajectory of observations.
             acts (1D numpy.ndarray): Trajectory of actions.
             reward_sum (int): Sum of accumulated rewards.
         """
-        assert actor in ['mpc', 'policy']
+        assert actor in ['mpc', 'policy', 'mpc_true_dynamics']
         O, A, reward_sum, done, times = [self.env.reset()], [], 0, False, []
 
-        if actor == 'mpc':
+        if actor in ['mpc', 'mpc_true_dynamics']:
             self.mpc.reset()
 
         for t in range(self.task_hor):
@@ -205,8 +219,13 @@ class Experiment:
 
             if actor == 'mpc':
                 A.append(self.mpc.act(O[t]))
-            else:
+            elif actor == 'policy':
                 A.append(self.policy.act(O[t]))
+            elif actor == 'mpc_true_dynamics':
+                A.append(self.mpc.act_true_dynamics(copy.deepcopy(self.env)))
+                print(t)
+            else:
+                raise NotImplementedError
 
             times.append(time.time() - start)
 

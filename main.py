@@ -14,7 +14,7 @@ from experiment import Experiment
 from config import get_config
 
 
-ALLOWED_ENVS = ["cartpole", "reacher", "pusher", "halfcheetah"]
+ALLOWED_ENVS = ["cartpole", "halfcheetah", "reacher3D", "pusher"]
 
 
 def set_random_seeds(seed):
@@ -51,8 +51,9 @@ def main(args):
 
     # Run experiment
     exp = Experiment(mpc, policy, args.logdir, args.savedir, cfg.exp_cfg)
-    #exp.run_baseline()
-    exp.run_debug()
+    #exp.run_mpc_baseline()
+    exp.run_expert()
+    #exp.run_debug()
     #exp.run_experiment(algo='behavior_cloning')
 
 
@@ -63,7 +64,7 @@ if __name__ == "__main__":
     parser.add_argument('--logdir', type=str, default='logs/cartpole',
                         help='Log directory for Tensorboard')
     parser.add_argument('--savedir', type=str, default='save/cartpole',
-                        help='Save directory for models')
+                        help='Save directory')
     args = parser.parse_args()
 
     main(args)

@@ -3,8 +3,8 @@ import scipy.stats as stats
 
 
 class CEMOptimizer:
-    def __init__(self, max_iters, popsize, num_elites, cost_function, upper_bound,
-                 lower_bound, epsilon=0.001, alpha=0.25):
+    def __init__(self, max_iters, popsize, num_elites, upper_bound, lower_bound,
+                 epsilon=0.001, alpha=0.25):
         """Cross-entropy method optimizer.
 
         Arguments:
@@ -23,7 +23,6 @@ class CEMOptimizer:
         self.max_iters = max_iters
         self.popsize = popsize
         self.num_elites = num_elites
-        self.cost_function = cost_function
         self.upper_bound, self.lower_bound, = upper_bound, lower_bound
         self.init_var = np.square(self.upper_bound - self.lower_bound) / 16
         self.sol_dim = self.init_var.shape[0]
@@ -32,13 +31,15 @@ class CEMOptimizer:
 
         assert num_elites <= popsize, "Number of elites must be at most the population size."
 
-    def obtain_solution(self, init_mean):
+    def obtain_solution(self, init_mean, cost_function):
         """ Optimize multiple CEM problems in parallel (parallel cost function computation)
         using the provided initial candidate distributions.
 
         Arguments:
             init_mean (2D np.ndarray): The means of the initial candidate distributions of
                 shape (num_problems, sol_dim).
+            cost_function (3D np.ndarray -> 2D np.ndarray): Function used to compute cost
+                of solutions to multiple problems in parallel.
         """
         mean, var, t = init_mean, self.init_var, 0
         num_problems = init_mean.shape[0]
@@ -55,7 +56,7 @@ class CEMOptimizer:
             samples = samples.astype(np.float32).transpose(1, 0, 2)
 
             # Compute costs for all problems in parallel of shape (num_problems, popsize)
-            costs = self.cost_function(samples)
+            costs = cost_function(samples)
 
             # Select elites for each problem independently
             elites = []

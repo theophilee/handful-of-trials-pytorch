@@ -1,9 +1,4 @@
-import os
 import argparse
-import torch
-import numpy as np
-import random
-import tensorflow as tf
 
 # To register environments
 import env
@@ -13,22 +8,10 @@ from policy import Policy
 from experiment import Experiment
 from config import get_config
 
+from utils import *
+
 
 ALLOWED_ENVS = ["cartpole", "halfcheetah", "reacher3D", "pusher"]
-
-
-def set_random_seeds(seed):
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    np.random.seed(seed)
-    random.seed(seed)
-    tf.set_random_seed(seed)
-
-
-def create_directories(directories):
-    for dir in directories:
-        if not os.path.exists(dir):
-            os.makedirs(dir)
 
 
 def main(args):
@@ -50,20 +33,22 @@ def main(args):
     policy = Policy(**cfg.policy_cfg)
 
     # Run experiment
-    exp = Experiment(mpc, policy, args.logdir, args.savedir, cfg.exp_cfg)
+    exp = Experiment(mpc, policy, args.env, args.logdir, args.savedir, cfg.exp_cfg)
+
     #exp.run_mpc_baseline()
-    exp.run_expert()
-    #exp.run_debug()
-    #exp.run_experiment(algo='behavior_cloning')
+    #exp.run_mpc_true_dynamics()
+    #exp.run_pretrained_policy()
+    #exp.run_behavior_cloning_basic()
+    exp.run_dagger_basic()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env', type=str, default='cartpole',
+    parser.add_argument('--env', type=str, default='halfcheetah',
                         help='Env name: one of {}'.format(ALLOWED_ENVS))
-    parser.add_argument('--logdir', type=str, default='logs/cartpole',
+    parser.add_argument('--logdir', type=str, default='runs/model-based',
                         help='Log directory for Tensorboard')
-    parser.add_argument('--savedir', type=str, default='save/cartpole',
+    parser.add_argument('--savedir', type=str, default='save/model-based',
                         help='Save directory')
     args = parser.parse_args()
 

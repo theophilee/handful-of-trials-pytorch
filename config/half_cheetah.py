@@ -72,10 +72,10 @@ class Config:
                           "opt_cfg": opt_cfg})
 
         policy_cfg = DotMap({"env": self.env,
-                             "hid_features": [200],
+                             "hid_features": [400, 300],
                              "activation": "relu",
                              "train_epochs": 20,
-                             "batch_size": 32,
+                             "batch_size": 250,
                              "lr": 1e-3,
                              "weight_decay": 0.})
 

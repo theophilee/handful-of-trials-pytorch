@@ -78,7 +78,7 @@ class Config:
                              "hid_features": [200],
                              "activation": "relu",
                              "train_epochs": 20,
-                             "batch_size": 32,
+                             "batch_size": 250,
                              "lr": 1e-3,
                              "weight_decay": 0.})
 

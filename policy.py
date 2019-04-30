@@ -2,22 +2,13 @@ import torch
 import torch.nn as nn
 from torch.optim import Adam
 from torch.utils.data import TensorDataset, DataLoader
-
-import numpy as np
 from collections import OrderedDict
 
 from model.layers import Swish
+from utils import *
 
 
 ACTIVATIONS = {'relu': nn.ReLU(), 'swish': Swish(), 'tanh':nn.Tanh()}
-TORCH_DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-
-
-def numpy_to_device(arr):
-    return torch.from_numpy(arr).float().to(TORCH_DEVICE)
-
-def numpy_from_device(tensor):
-    return tensor.cpu().numpy()
 
 
 class Policy:
@@ -50,7 +41,7 @@ class Policy:
         self.Y = torch.empty((0, self.act_features))
     
     def _make_network(self, obs_features, act_features, hid_features, activation):
-        # TODO might need to add an output activation
+        # TODO might need to add an output activation?
         if len(hid_features) > 0:
             layers = []
 
@@ -69,47 +60,63 @@ class Policy:
         self.X = torch.empty((0, self.obs_features))
         self.Y = torch.empty((0, self.act_features))
 
-    def train(self, obs, acts):
-        new_X = torch.from_numpy(obs).float()
-        new_Y = torch.from_numpy(acts).float()
-
-        # Add new data to training set
-        self.X = torch.cat((self.X, new_X))
-        self.Y = torch.cat((self.Y, new_Y))
+    def train(self, obs, acts, train_split=0.8, iterative=False):
+        if iterative:
+            # Add new data to training set
+            self.X = torch.cat((self.X, torch.from_numpy(obs).float()))
+            self.Y = torch.cat((self.Y, torch.from_numpy(acts).float()))
+        else:
+            self.X = torch.from_numpy(obs).float()
+            self.Y = torch.from_numpy(acts).float()
 
         # Compute input statistics for normalization
-        self._fit_input_stats(self.X)
+        num_train = int(self.X.size(0) * train_split)
+        self._fit_input_stats(self.X[:num_train])
 
-        # Record MSE on new data (test set)
-        metrics = OrderedDict()
-        metrics["policy/mse/test"] = self.criterion(self.net(new_X.to(TORCH_DEVICE)),
-                                                    new_Y.to(TORCH_DEVICE)).item()
+        train_dataset = TensorDataset(self.X[:num_train], self.Y[:num_train])
+        train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
+        test_dataset = TensorDataset(self.X[num_train:], self.Y[num_train:])
+        test_loader = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=True)
 
-        dataset = TensorDataset(self.X, self.Y)
-        loader = DataLoader(dataset, batch_size=self.batch_size, shuffle=True)
-        num_batches = len(loader)
+        train_mses, test_mses = [], []
+        early_stopping = EarlyStopping()
 
-        train_mses = []
-        for e in range(self.train_epochs):
-            mse = 0
-
-            for (X, Y) in loader:
-                loss = self.criterion(self.net(X.to(TORCH_DEVICE)), Y.to(TORCH_DEVICE))
-                mse += loss.item()
+        # Train until test error stops decreasing
+        while not early_stopping.early_stop:
+            train_mse = 0
+            for (X, Y) in train_loader:
+                loss = self.criterion(self.predict(X.to(TORCH_DEVICE)), Y.to(TORCH_DEVICE))
+                train_mse += loss.item()
 
                 # Take a gradient step
                 self.optim.zero_grad()
                 loss.backward()
                 self.optim.step()
 
-            train_mses.append(mse / len(loader))
+            train_mses.append(train_mse / len(train_loader))
 
-        # Record MSE on training set for each epoch
+            test_mse = 0
+            for (X, Y) in test_loader:
+                loss = self.criterion(self.predict(X.to(TORCH_DEVICE)), Y.to(TORCH_DEVICE))
+                test_mse += loss.item()
+
+            test_mses.append(test_mse / len(test_loader))
+            early_stopping(test_mse / len(test_loader), self.net)
+
+        # Load policy with best validation loss
+        early_stopping.load_best(self.net)
+
+        # Record train/test MSE for each epoch
+        metrics = OrderedDict()
         metrics["policy/mse/train"] = train_mses
-        #for i, mse in enumerate(train_mses):
-        #    metrics["policy/mse/train/epoch_{}".format(i + 1)] = mse
+        metrics["policy/mse/test"] = test_mses
 
         return metrics
+
+    def predict(self, input):
+        # Normalize input
+        input = (input - self.input_mean) / self.input_std
+        return self.net(input)
 
     def act(self, obs):
         """Returns the action that this policy would take given observation obs.
@@ -120,10 +127,9 @@ class Policy:
         Returns: An action (1D numpy.ndarray).
         """
         with torch.no_grad():
-            return numpy_from_device(self.net(numpy_to_device(obs)))
+            return numpy_from_device(self.predict(numpy_to_device(obs)))
 
     def _fit_input_stats(self, input):
         # Store data statistics for normalization
-        # TODO try input normalization and see if makes a difference
         self.input_mean = torch.mean(input, dim=0, keepdim=True).to(TORCH_DEVICE)
         self.input_std = torch.std(input, dim=0, keepdim=True).to(TORCH_DEVICE)

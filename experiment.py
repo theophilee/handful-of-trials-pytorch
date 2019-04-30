@@ -4,7 +4,8 @@ import torch
 import copy
 import numpy as np
 
-from utils import Logger
+import utils
+from model_free import TD3
 
 
 def print_rollout_stats(obs, acts, reward_sum):
@@ -16,7 +17,7 @@ def print_rollout_stats(obs, acts, reward_sum):
 
 
 class Experiment:
-    def __init__(self, mpc, policy, logdir, savedir, args):
+    def __init__(self, mpc, policy, env_string, logdir, savedir, args):
         """Experiment.
 
         Arguments:
@@ -24,6 +25,7 @@ class Experiment:
                 to be trained.
             policy (Policy): Parameterized reactive policy to be trained by
                 imitation learning on model-based controller.
+            env_string (str): String corresponding to environment.
             logdir: Log directory for Tensorboard.
             savedir: Save directory.
             args (DotMap): A DotMap of experiment parameters.
@@ -40,12 +42,15 @@ class Experiment:
         self.num_rollouts = args.num_rollouts
         self.num_imagined_rollouts = args.num_imagined_rollouts
 
-        self.savedir = savedir
+        self.env_string = env_string
+        self.savedir = os.path.join(savedir, env_string)
         self.path_mpc = os.path.join(savedir, 'mpc.pth')
         self.path_policy = os.path.join(savedir, 'policy.pth')
 
+        utils.create_directories([self.savedir, logdir])
+
         # Tensorboard summary writer
-        self.logger = Logger(logdir)
+        self.logger = utils.Logger(os.path.join(logdir, env_string))
 
     def run_mpc_baseline(self):
         """Model predictive control baseline (no parameterized policy).
@@ -83,8 +88,8 @@ class Experiment:
             # Save model
             torch.save(self.mpc, self.path_mpc)
 
-    def run_expert(self):
-        """Model predictive control using true dynamics (expert demonstration).
+    def run_mpc_true_dynamics(self):
+        """Model predictive control using true dynamics.
         """
         # TODO super slow -> how to parallellize true dynamics env.step()?
         # Sample rollout using mpc with true dynamics
@@ -95,31 +100,76 @@ class Experiment:
         np.save(os.path.join(self.savedir, 'expert_obs'), obs)
         np.save(os.path.join(self.savedir, 'expert_acts'), acts)
 
-    def run_debug(self):
-        """Train behaviour cloning or DAgger in a simpler non-iterative setting to get a feel
-        for it and get hyper-parameters right. Imitate fixed nearly optimal policy (e.g
-        trained controller).
+    def run_pretrained_policy(self):
+        """Pretrained model-free policy (TD3 algorithm, improvement over DDPG).
         """
-        # Restore model
-        self.mpc = torch.load(self.path_mpc)
+        state_dim = self.env.observation_space.shape[0]
+        action_dim = self.env.action_space.shape[0]
+        max_action = float(self.env.action_space.high[0])
 
-        # Training loop
-        for i in range(self.num_rollouts):
-            print()
-            print("Starting training iteration %d." % (i + 1))
+        # Restore weights of pretrained policy
+        self.TD3 = TD3(state_dim, action_dim, max_action)
+        try:
+            self.TD3.load(self.env_string, "save/model-free")
+        except:
+            print("Could not load pretrained policy!")
 
-            # Sample rollout from mpc
-            obs_mpc, acts_mpc, reward_sum_mpc = self.sample_rollout(actor='mpc')
-            print_rollout_stats(obs_mpc, acts_mpc, reward_sum_mpc)
+        # Sample rollouts
+        O, A = [], []
+        for _ in range(100):
+            obs, acts, reward_sum = self.sample_rollout(actor='TD3_pretrained')
+            print_rollout_stats(obs, acts, reward_sum)
+            O.append(obs)
+            A.append(acts)
+        O, A = np.array(O), np.array(A)
 
-            # Train parameterized policy by behavior cloning
-            metrics_policy = self.policy.train(obs_mpc[:-1], acts_mpc)
-            print("Imitation learning test error", metrics_policy["policy/mse/test"])
-            print("Imitation learning training error", metrics_policy["policy/mse/train"])
+        # Save rollouts (to use as expert demonstrations)
+        np.save(os.path.join(self.savedir, 'expert_obs'), O)
+        np.save(os.path.join(self.savedir, 'expert_acts'), A)
 
-            # Sample rollout from parameterized policy for evaluation
-            obs_policy, acts_policy, reward_sum_policy = self.sample_rollout(actor='policy')
-            print_rollout_stats(obs_policy, acts_policy, reward_sum_policy)
+    def run_behavior_cloning_basic(self):
+        """Train parameterized policy with behaviour cloning on saved demonstrations.
+        """
+        # Load expert demonstrations
+        obs = np.load(os.path.join(self.savedir, 'expert_obs.npy'))
+        acts = np.load(os.path.join(self.savedir, 'expert_acts.npy'))
+        obs = obs[:, :-1].reshape(-1, self.env.observation_space.shape[0])
+        acts = acts.reshape(-1, self.env.action_space.shape[0])
+
+        # Train parameterized policy by behavior cloning
+        metrics = self.policy.train(obs, acts, iterative=False)
+        print("Imitation learning test error", metrics["policy/mse/test"])
+        print("Imitation learning training error", metrics["policy/mse/train"])
+
+        # Sample rollout from parameterized policy for evaluation
+        obs_policy, acts_policy, reward_sum_policy = self.sample_rollout(actor='policy')
+        print_rollout_stats(obs_policy, acts_policy, reward_sum_policy)
+
+    def run_dagger_basic(self):
+        """Train parameterized policy with DAgger using pretrained TD3 expert.
+        """
+        state_dim = self.env.observation_space.shape[0]
+        action_dim = self.env.action_space.shape[0]
+        max_action = float(self.env.action_space.high[0])
+
+        # Restore weights of pretrained policy
+        self.TD3 = TD3(state_dim, action_dim, max_action)
+        try:
+            self.TD3.load(self.env_string, "save/model-free")
+        except:
+            print("Could not load pretrained policy!")
+
+        # Sample first rollout from expert and initialize policy
+        obs, acts, reward_sum = self.sample_rollout(actor='TD3_pretrained')
+        self.policy.train(obs[:-1], acts, iterative=True)
+
+        # Sample subsequent rollouts from policy and label with expert
+        for _ in range(50):
+            obs, acts, reward_sum = self.sample_rollout(actor='policy')
+            print_rollout_stats(obs, acts, reward_sum)
+
+            labels = self.TD3.act_parallel(obs[:-1])
+            self.policy.train(obs[:-1], labels, iterative=True)
 
     def run_experiment(self, algo):
         """Learn parameterized policy by behavior cloning on trajectories generated by
@@ -201,14 +251,14 @@ class Experiment:
         """Sample a rollout generated by a given actor in the environment.
 
         Argument:
-            actor (str): One of 'mpc', 'policy', 'mpc_true_dynamics'.
+            actor (str): One of 'mpc', 'policy', 'mpc_true_dynamics', 'TD3_pretrained'.
 
         Returns:
             obs (1D numpy.ndarray): Trajectory of observations.
             acts (1D numpy.ndarray): Trajectory of actions.
             reward_sum (int): Sum of accumulated rewards.
         """
-        assert actor in ['mpc', 'policy', 'mpc_true_dynamics']
+        assert actor in ['mpc', 'policy', 'mpc_true_dynamics', 'TD3_pretrained']
         O, A, reward_sum, done, times = [self.env.reset()], [], 0, False, []
 
         if actor in ['mpc', 'mpc_true_dynamics']:
@@ -224,6 +274,8 @@ class Experiment:
             elif actor == 'mpc_true_dynamics':
                 A.append(self.mpc.act_true_dynamics(copy.deepcopy(self.env)))
                 print(t)
+            elif actor == 'TD3_pretrained':
+                A.append(self.TD3.act(O[t]))
             else:
                 raise NotImplementedError
 

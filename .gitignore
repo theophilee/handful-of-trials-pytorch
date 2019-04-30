@@ -62,7 +62,3 @@ __pycache__/
 log/
 *.lprof
 .DS_Store
-
-# Logs and save files
-logs
-save

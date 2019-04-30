@@ -1,6 +1,4 @@
-import torch
 import copy
-import numpy as np
 from collections import OrderedDict
 from functools import partial
 
@@ -10,24 +8,9 @@ try:
 except RuntimeError:
     pass
 
+from utils import *
 from model import BootstrapEnsemble
 from optimizer import CEMOptimizer
-
-
-TORCH_DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
-
-
-def shuffle_rows(arr):
-    idxs = np.argsort(np.random.uniform(size=arr.shape), axis=-1)
-    return arr[np.arange(arr.shape[0])[:, None], idxs]
-
-
-def numpy_to_device(arr):
-    return torch.from_numpy(arr).float().to(TORCH_DEVICE)
-
-
-def numpy_from_device(tensor):
-    return tensor.cpu().data.numpy()
 
 
 class MPC:

@@ -59,6 +59,7 @@ fabric.properties
 .idea/workspace.xml
 .idea/
 __pycache__/
-log/
 *.lprof
 .DS_Store
+save/
+logs/

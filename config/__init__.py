@@ -7,6 +7,8 @@ def get_config(env):
         from .reacher3D import Config
     elif env == "pusher":
         from .pusher import Config
+    elif env == "hopper":
+        from .hopper import Config
     else:
         raise NotImplementedError
 

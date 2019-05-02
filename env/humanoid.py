@@ -3,17 +3,20 @@ import numpy as np
 from gym.envs.mujoco import mujoco_env
 from gym import utils
 
+
 def mass_center(model, sim):
     mass = np.expand_dims(model.body_mass, 1)
     xpos = sim.data.xipos
     return (np.sum(mass * xpos, 0) / np.sum(mass))[0]
 
-# TODO modify environment
+
+# TODO finish environment
 class HumanoidEnv(mujoco_env.MujocoEnv, utils.EzPickle):
     def __init__(self):
         dir_path = os.path.dirname(os.path.realpath(__file__))
         mujoco_env.MujocoEnv.__init__(self, '%s/assets/humanoid.xml' % dir_path, 5)
         utils.EzPickle.__init__(self)
+        self._max_episode_steps = 1000 # TODO check
 
     def _get_obs(self):
         data = self.sim.data

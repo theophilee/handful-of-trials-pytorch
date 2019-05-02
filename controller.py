@@ -1,12 +1,13 @@
 import copy
 from collections import OrderedDict
 from functools import partial
+from torch.utils.data import TensorDataset, DataLoader
 
-from torch.multiprocessing import Pool, set_start_method
-try:
-    set_start_method('spawn')
-except RuntimeError:
-    pass
+#from torch.multiprocessing import Pool, set_start_method
+#try:
+#    set_start_method('spawn')
+#except RuntimeError:
+#    pass
 
 from utils import *
 from model import BootstrapEnsemble
@@ -14,16 +15,15 @@ from optimizer import CEMOptimizer
 
 
 class MPC:
-    def __init__(self, args):
+    def __init__(self, param_str, args):
         """Model predictive controller.
 
         Arguments:
+            param_str (str): String descriptor of experiment hyper-parameters.
             args (DotMap): A DotMap of MPC parameters.
                 .env (gym.env): Environment for which this controller will be used.
                 .plan_hor (int): The planning horizon that will be used in optimization.
                 .num_part (int): Number of particles used for propagation method.
-                .train_epochs (int): Number of epochs of training each time we refit
-                    the model.
                 .batch_size (int): Batch size.
                 .obs_preproc (func): A function which modifies observations before they
                     are passed into the model.
@@ -59,13 +59,13 @@ class MPC:
                     .alpha (float): Controls how much of the previous mean and variance is
                         used for the next iteration.
         """
+        self.ckpt_file = param_str + '_ckpt.pt'
         self.env = args.env
         self.act_features = args.env.action_space.shape[0]
         self.obs_features = args.env.observation_space.shape[0]
         self.act_high, self.act_low = args.env.action_space.high, args.env.action_space.low
         self.plan_hor = args.plan_hor
         self.num_part = args.num_part
-        self.train_epochs = args.train_epochs
         self.batch_size = args.batch_size
         self.num_nets = args.model_cfg.ensemble_size
 
@@ -90,61 +90,87 @@ class MPC:
         self.prev_plan = None
 
         # Dataset to train model
-        self.X = np.empty((0, args.model_cfg.in_features))
-        self.Y = np.empty((0, args.model_cfg.out_features))
+        self.X = torch.empty((0, args.model_cfg.in_features))
+        self.Y = torch.empty((0, args.model_cfg.out_features))
 
         # Bootstrap ensemble model
         self.model = BootstrapEnsemble(**args.model_cfg)
+        print(self.num_nets)
 
-    def train(self, obs, acts):
+    def train(self, obs, acts, train_split=0.9, iterative=True):
         self.has_been_trained = True
 
         # Preprocess new data
-        new_X = np.concatenate([self.obs_preproc(obs[:-1]), acts], axis=1)
-        new_Y = self.targ_proc(obs[:-1], obs[1:])
+        X_new = torch.from_numpy(np.concatenate([self.obs_preproc(obs[:-1]), acts], axis=1)).float()
+        Y_new = torch.from_numpy(self.targ_proc(obs[:-1], obs[1:])).float()
 
-        # Add new data to training set
-        self.X = np.concatenate([self.X, new_X])
-        self.Y = np.concatenate([self.Y, new_Y])
+        if iterative:
+            # Add new data to training set
+            self.X = torch.cat((self.X, X_new))
+            self.Y = torch.cat((self.Y, Y_new))
+        else:
+            self.X = X_new
+            self.Y = Y_new
 
         # Store input statistics for normalization
-        self.model.fit_input_stats(numpy_to_device(self.X))
+        num_train = int(self.X.size(0) * train_split)
+        self.model.fit_input_stats(self.X[:num_train])
 
-        # Record per model MSE and cross-entropy on new data (test set)
-        metrics = OrderedDict()
-        metrics["model/mse/test"], metrics["model/xentropy/test"] = self.model.evaluate(
-            numpy_to_device(new_X), numpy_to_device(new_Y))
+        if iterative:
+            # Compute per model mse and cross-entropy on new test data
+            metrics = OrderedDict()
+            metrics["model/mse/test"], metrics["model/xentropy/test"] = self.model.evaluate(
+                X_new.to(TORCH_DEVICE), Y_new.to(TORCH_DEVICE))
 
-        num_examples = self.X.shape[0]
-        num_batches = int(np.ceil(num_examples / self.batch_size))
-        idxs = np.random.randint(num_examples, size=[self.num_nets, num_examples])
+        train_dataset = TensorDataset(self.X[:num_train], self.Y[:num_train])
+        train_loader = DataLoader(train_dataset, batch_size=self.num_nets * self.batch_size, shuffle=True)
+        test_dataset = TensorDataset(self.X[num_train:], self.Y[num_train:])
+        test_loader = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=True)
 
-        mses = np.zeros((self.train_epochs, num_batches, self.num_nets))
-        xentropies = np.zeros((self.train_epochs, num_batches, self.num_nets))
+        train_mses, train_xentropies = [], []
+        val_mses, val_xentropies = [], []
+        early_stopping = EarlyStopping(ckpt_file=self.ckpt_file,
+                                       patience=min(20, 10 * self.num_nets))
 
         # Training loop
-        for e in range(self.train_epochs):
-            for b in range(num_batches):
-                batch_idxs = idxs[:, b * self.batch_size: (b + 1) * self.batch_size]
+        while not early_stopping.early_stop:
+            train_mse = np.zeros((len(train_loader), self.num_nets))
+            train_xentropy = np.zeros((len(train_loader), self.num_nets))
+            val_mse = np.zeros((len(test_loader), self.num_nets))
+            val_xentropy = np.zeros((len(test_loader), self.num_nets))
 
-                # Take a gradient step
-                mses[e, b], xentropies[e, b] = self.model.update(
-                    numpy_to_device(self.X[batch_idxs]),
-                    numpy_to_device(self.Y[batch_idxs]))
+            for i, (X, Y) in enumerate(train_loader):
+                X = X.view(self.num_nets, X.size(0) // self.num_nets, -1).to(TORCH_DEVICE)
+                Y = Y.view(self.num_nets, Y.size(0) // self.num_nets, -1).to(TORCH_DEVICE)
+                train_mse[i], train_xentropy[i] = self.model.update(X, Y)
 
-            np.random.shuffle(idxs)
+            for i, (X, Y) in enumerate(test_loader):
+                val_mse[i], val_xentropy[i] = self.model.evaluate(X.to(TORCH_DEVICE), Y.to(TORCH_DEVICE))
 
-        # Record per model mean squared error and cross-entropy on training set
-        metrics["model/mse/train"] = mses.mean(axis=(0, 1))
-        metrics["model/xentropy/train"] = xentropies.mean(axis=(0, 1))
+            train_mses.append(np.mean(train_mse, axis=0))
+            train_xentropies.append(np.mean(train_xentropy, axis=0))
+            val_mses.append(np.mean(val_mse, axis=0))
+            val_xentropies.append(np.mean(val_xentropy, axis=0))
+
+            # Stop if mean validation mse across all models stops decreasing
+            early_stopping(np.mean(val_mse), self.model.net)
+
+        # Load policy with best validation loss
+        early_stopping.load_best(self.model.net)
+
+        # Record train/val per model mse and cross-entropy for each epoch
+        metrics["model/mse/train"] = train_mses
+        metrics["model/xentropy/train"] = train_xentropies
+        metrics["model/mse/val"] = val_mses
+        metrics["model/xentropy/val"] = val_xentropies
 
         # Record parameters and gradients
-        weights, grads = OrderedDict(), OrderedDict()
-        for name, param in self.model.net.named_parameters():
-            weights[name] = numpy_from_device(param.clone())
-            grads[name] = numpy_from_device(param.grad.clone())
+        #weights, grads = OrderedDict(), OrderedDict()
+        #for name, param in self.model.net.named_parameters():
+        #    weights[name] = numpy_from_device(param.clone())
+        #    grads[name] = numpy_from_device(param.grad.clone())
 
-        return metrics, weights, grads
+        return metrics
 
     def reset(self):
         """Resets this controller (clears previous solution, calls all update functions).
@@ -348,11 +374,11 @@ class MPC:
         Returns:
           costs (2D numpy.ndarray): Cost of plans of shape (1, num_plans).
         """
-        # TODO use multiple particles to evaluate plans?
         plans = [p.reshape(self.plan_hor, self.act_features) for p in plans[0]]
         eval_fn = partial(self._eval_plan, env=env)
 
         # Evaluate plans
+        # TODO use multiple particles to evaluate plans?
         # TODO parallellize plan evaluation with multi-threading?
         # TODO why so SLOW? how to get faster access to true dynamics?
         costs = [eval_fn(plan) for plan in plans]

@@ -9,6 +9,7 @@ class HalfCheetahEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         dir_path = os.path.dirname(os.path.realpath(__file__))
         mujoco_env.MujocoEnv.__init__(self, '%s/assets/half_cheetah.xml' % dir_path, 5)
         utils.EzPickle.__init__(self)
+        self._max_episode_steps = 1000
 
     def _step(self, act):
         self.prev_qpos = np.copy(self.model.data.qpos.flat)

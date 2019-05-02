@@ -25,3 +25,8 @@ register(
     id='MyPusher-v0',
     entry_point='env.pusher:PusherEnv'
 )
+
+register(
+    id='MyHopper-v0',
+    entry_point='env.pusher:PusherEnv'
+)

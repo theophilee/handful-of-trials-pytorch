@@ -11,6 +11,7 @@ class Reacher3DEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         dir_path = os.path.dirname(os.path.realpath(__file__))
         self.goal = np.zeros(3)
         mujoco_env.MujocoEnv.__init__(self, os.path.join(dir_path, 'assets/reacher3D.xml'), 2)
+        self._max_episode_steps = 150
 
     def _step(self, a):
         self.do_simulation(a, self.frame_skip)

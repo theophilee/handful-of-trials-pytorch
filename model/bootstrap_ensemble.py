@@ -8,6 +8,10 @@ ACTIVATIONS = {'relu': nn.ReLU(), 'swish': Swish(), 'tanh': nn.Tanh()}
 TORCH_DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
 
+def numpy_from_device(tensor):
+    return tensor.cpu().detach().numpy()
+
+
 class BootstrapEnsemble:
     def __init__(self, ensemble_size, in_features, out_features, hid_features, activation,
                  lr, weight_decay):
@@ -46,8 +50,8 @@ class BootstrapEnsemble:
     def fit_input_stats(self, input):
         # Store data statistics for normalization
         # TODO how important is input normalization?
-        self.input_mean = torch.mean(input, dim=0, keepdim=True)
-        self.input_std = torch.std(input, dim=0, keepdim=True)
+        self.input_mean = torch.mean(input, dim=0, keepdim=True).to(TORCH_DEVICE)
+        self.input_std = torch.std(input, dim=0, keepdim=True).to(TORCH_DEVICE)
         self.input_std.data[self.input_std.data < 1e-12] = 1.0
 
     def predict(self, input):
@@ -75,8 +79,8 @@ class BootstrapEnsemble:
         self.optim.step()
 
         # Compute model-wise mean squared error and cross-entropy for diagnostics
-        mses = mse.mean((-2, -1)).detach().cpu().numpy()
-        xentropies = xentropy.mean((-2, -1)).detach().cpu().numpy()
+        mses = numpy_from_device(mse.mean((-2, -1)))
+        xentropies = numpy_from_device(xentropy.mean((-2, -1)))
 
         return mses, xentropies
 
@@ -87,7 +91,7 @@ class BootstrapEnsemble:
         mse = (mean - targ) ** 2
         xentropy = mse * inv_var + logvar
 
-        mses = mse.mean((-2, -1)).detach().cpu().numpy()
-        xentropies = xentropy.mean((-2, -1)).detach().cpu().numpy()
+        mses = numpy_from_device(mse.mean((-2, -1)))
+        xentropies = numpy_from_device(xentropy.mean((-2, -1)))
 
         return mses, xentropies

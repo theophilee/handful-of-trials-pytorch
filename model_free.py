@@ -180,13 +180,11 @@ class ReplayBuffer(object):
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--env", default="halfcheetah") # OpenAI gym environment name
+    parser.add_argument("--env", default="swimmer") # OpenAI gym environment name
     parser.add_argument("--savedir", default="save/model-free") # Save directory
     parser.add_argument("--seed", default=0, type=int)  # Sets Gym, PyTorch and Numpy seeds
-    parser.add_argument("--start_timesteps", default=1e4,
-                        type=int)  # How many time steps purely random policy is run for
-    parser.add_argument("--eval_freq", default=5e3, type=float)  # How often (time steps) we evaluate
-    parser.add_argument("--max_timesteps", default=1e6, type=float)  # Max time steps to run environment for
+    parser.add_argument("--start_timesteps", default=1e4, type=int)  # How many time steps purely random policy is run for
+    parser.add_argument("--max_timesteps", default=1e5, type=float)  # Max time steps to run environment for
     parser.add_argument("--expl_noise", default=0.1, type=float)  # Std of Gaussian exploration noise
     parser.add_argument("--batch_size", default=100, type=int)  # Batch size for both actor and critic
     parser.add_argument("--discount", default=0.99, type=float)  # Discount factor
@@ -200,17 +198,25 @@ if __name__ == "__main__":
     set_random_seeds(args.seed)
 
     # Create save directory
-    create_directories([args.savedir])
+    if not os.path.exists(args.savedir):
+        os.makedirs(args.savedir)
 
-    ALLOWED_ENVS = ["cartpole", "halfcheetah", "reacher3D", "pusher"]
     assert args.env in ALLOWED_ENVS
 
     if args.env == "cartpole":
         env = gym.make("MyCartpole-v0")
-        env._max_episode_steps = 200
     elif args.env == "halfcheetah":
         env = gym.make("MyHalfCheetah-v0")
-        env._max_episode_steps = 1000
+    elif args.env == "reacher3D":
+        env = gym.make("MyReacher3D-v0")
+    elif args.env == "pusher":
+        env = gym.make("MyPusher-v0")
+    elif args.env == "hopper":
+        env = gym.make("MyHopper-v0")
+        #env = gym.make("Hopper-v1")
+    elif args.env == "swimmer":
+        env = gym.make("MySwimmer-v0")
+        #env = gym.make("Hopper-v1")
     else:
         raise NotImplementedError
 

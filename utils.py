@@ -7,6 +7,7 @@ import tensorflow as tf
 
 
 TORCH_DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+ALLOWED_ENVS = ["cartpole", "halfcheetah", "reacher3D", "pusher", "swimmer", "hopper"]
 
 
 def set_random_seeds(seed):
@@ -22,7 +23,7 @@ def numpy_to_device(arr):
 
 
 def numpy_from_device(tensor):
-    return tensor.cpu().numpy()
+    return tensor.cpu().detach().numpy()
 
 
 def create_directories(directories):
@@ -86,7 +87,7 @@ class Logger:
 
 class EarlyStopping:
     """Early stops the training if validation loss doesn't improve after a given patience."""
-    def __init__(self, patience=10, verbose=False):
+    def __init__(self, ckpt_file='ckpt.pt', patience=10, verbose=False):
         """
         Args:
             patience (int): How long to wait after last time validation loss improved.
@@ -98,13 +99,14 @@ class EarlyStopping:
         self.best_score = None
         self.early_stop = False
         self.val_loss_min = np.Inf
+        self.ckpt_file = ckpt_file
 
     def __call__(self, val_loss, model):
         score = -val_loss
 
         if self.best_score is None:
             self.best_score = score
-            self.save_checkpoint(val_loss, model)
+            self.save_ckpt(val_loss, model)
         elif score < self.best_score:
             self.counter += 1
             if self.verbose:
@@ -113,15 +115,15 @@ class EarlyStopping:
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(val_loss, model)
+            self.save_ckpt(val_loss, model)
             self.counter = 0
 
-    def save_checkpoint(self, val_loss, model):
+    def save_ckpt(self, val_loss, model):
         # Saves model when validation loss decreases
         if self.verbose:
             print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}), saving model.')
-        torch.save(model.state_dict(), 'checkpoint.pt')
+        torch.save(model.state_dict(), self.ckpt_file)
         self.val_loss_min = val_loss
 
     def load_best(self, model):
-        model.load_state_dict(torch.load('checkpoint.pt'))
+        model.load_state_dict(torch.load(self.ckpt_file))

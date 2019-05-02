@@ -6,9 +6,6 @@ from dotmap import DotMap
 class Config:
     def __init__(self):
         self.env = gym.make("MyPusher-v0")
-        self.task_hor = 150
-        self.num_rollouts = 100
-        self.in_features, self.out_features = 27, 20
 
         self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         self.prev_ac_goal_pos = None
@@ -49,13 +46,12 @@ class Config:
 
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,
-                          "task_hor": self.task_hor,
-                          "num_rollouts": self.num_rollouts,
+                          "num_rollouts": 100,
                           "num_imagined_rollouts": 2})
 
         model_cfg = DotMap({"ensemble_size": 1,
-                            "in_features": self.in_features,
-                            "out_features": self.out_features,
+                            "in_features": 27,
+                            "out_features": 20,
                             "hid_features": [200, 200],
                             "activation": "relu",
                             "lr": 1e-3,
@@ -70,7 +66,6 @@ class Config:
         mpc_cfg = DotMap({"env": self.env,
                           "plan_hor": 25,
                           "num_part": 20,
-                          "train_epochs": 5,
                           "batch_size": 32,
                           "obs_preproc": self.obs_preproc,
                           "pred_postproc": self.pred_postproc,
@@ -83,7 +78,6 @@ class Config:
         policy_cfg = DotMap({"env": self.env,
                              "hid_features": [200],
                              "activation": "relu",
-                             "train_epochs": 20,
                              "batch_size": 250,
                              "lr": 1e-3,
                              "weight_decay": 0.})

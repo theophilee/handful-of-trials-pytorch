@@ -17,7 +17,7 @@ def print_rollout_stats(obs, acts, reward_sum):
 
 
 class Experiment:
-    def __init__(self, mpc, policy, env_string, logdir, savedir, args):
+    def __init__(self, mpc, policy, env_str, param_str, logdir, savedir, args):
         """Experiment.
 
         Arguments:
@@ -25,12 +25,12 @@ class Experiment:
                 to be trained.
             policy (Policy): Parameterized reactive policy to be trained by
                 imitation learning on model-based controller.
-            env_string (str): String corresponding to environment.
+            env_str (str): String descriptor of environment.
+            param_str (str): String descriptor of experiment hyper-parameters.
             logdir: Log directory for Tensorboard.
             savedir: Save directory.
             args (DotMap): A DotMap of experiment parameters.
                 .env: (OpenAI gym environment) The environment for this agent.
-                .task_hor (int): Task horizon.
                 .num_rollouts (int): Number of rollouts for which we train.
                 .num_imagined_rollouts (int): Number of imagined rollouts per
                     iteration of inner imitation learning loop.
@@ -38,19 +38,19 @@ class Experiment:
         self.mpc = mpc
         self.policy = policy
         self.env = args.env
-        self.task_hor = args.task_hor
+        self.task_hor = self.env._max_episode_steps
         self.num_rollouts = args.num_rollouts
         self.num_imagined_rollouts = args.num_imagined_rollouts
 
-        self.env_string = env_string
-        self.savedir = os.path.join(savedir, env_string)
+        self.env_str = env_str
+        self.savedir = os.path.join(savedir, env_str)
         self.path_mpc = os.path.join(savedir, 'mpc.pth')
         self.path_policy = os.path.join(savedir, 'policy.pth')
 
         utils.create_directories([self.savedir, logdir])
 
         # Tensorboard summary writer
-        self.logger = utils.Logger(os.path.join(logdir, env_string))
+        self.logger = utils.Logger(os.path.join(logdir, "{}_{}".format(env_str, param_str)))
 
     def run_mpc_baseline(self):
         """Model predictive control baseline (no parameterized policy).
@@ -69,24 +69,14 @@ class Experiment:
             print_rollout_stats(obs, acts, reward_sum)
 
             # Train model
-            metrics, weights, grads = self.mpc.train(obs, acts)
+            metrics = self.mpc.train(obs, acts)
 
             # Log to Tensorboard
             step = (i + 1) * self.task_hor
             self.logger.log_scalar("reward/mpc", reward_sum, step)
-
-            for key, metric in metrics.items():
-                self.logger.log_scalar("{}/mean".format(key), metric.mean(), step)
-            #    for n in range(len(metric)):
-            #        self.logger.log_scalar("{}/model{}".format(key, n + 1), metric[n], step)
-
-            #for key, weight in weights.items():
-            #    self.logger.log_histogram("weight/{}".format(key), weight, step)
-            #for key, grad in grads.items():
-            #    self.logger.log_histogram("grad/{}".format(key), grad, step)
-
-            # Save model
-            torch.save(self.mpc, self.path_mpc)
+            self.logger.log_scalar("model/mse/test", metrics["model/mse/test"].mean(), step)
+            self.logger.log_scalar("model/mse/train", metrics["model/mse/train"][-1].mean(), step)
+            self.logger.log_scalar("model/mse/val", metrics["model/mse/val"][-1].mean(), step)
 
     def run_mpc_true_dynamics(self):
         """Model predictive control using true dynamics.
@@ -110,7 +100,7 @@ class Experiment:
         # Restore weights of pretrained policy
         self.TD3 = TD3(state_dim, action_dim, max_action)
         try:
-            self.TD3.load(self.env_string, "save/model-free")
+            self.TD3.load(self.env_str, "save/model-free")
         except:
             print("Could not load pretrained policy!")
 
@@ -137,9 +127,7 @@ class Experiment:
         acts = acts.reshape(-1, self.env.action_space.shape[0])
 
         # Train parameterized policy by behavior cloning
-        metrics = self.policy.train(obs, acts, iterative=False)
-        print("Imitation learning test error", metrics["policy/mse/test"])
-        print("Imitation learning training error", metrics["policy/mse/train"])
+        self.policy.train(obs, acts, iterative=False)
 
         # Sample rollout from parameterized policy for evaluation
         obs_policy, acts_policy, reward_sum_policy = self.sample_rollout(actor='policy')
@@ -155,21 +143,51 @@ class Experiment:
         # Restore weights of pretrained policy
         self.TD3 = TD3(state_dim, action_dim, max_action)
         try:
-            self.TD3.load(self.env_string, "save/model-free")
+            self.TD3.load(self.env_str, "save/model-free")
         except:
             print("Could not load pretrained policy!")
 
-        # Sample first rollout from expert and initialize policy
-        obs, acts, reward_sum = self.sample_rollout(actor='TD3_pretrained')
-        self.policy.train(obs[:-1], acts, iterative=True)
+        # Sample first rollout from expert
+        obs, act_labels, reward_sum = self.sample_rollout(actor='TD3_pretrained')
 
-        # Sample subsequent rollouts from policy and label with expert
         for _ in range(50):
+            # Train parameterized policy
+            metrics = self.policy.train(obs[:-1], act_labels, iterative=True)
+            print("Test", metrics["policy/mse/test"])
+            print("Train", metrics["policy/mse/train"][-1])
+            print("Val", metrics["policy/mse/val"][-1])
+
+            # Sample subsequent rollouts from policy and label with expert
             obs, acts, reward_sum = self.sample_rollout(actor='policy')
             print_rollout_stats(obs, acts, reward_sum)
+            act_labels = self.TD3.act_parallel(obs[:-1])
 
-            labels = self.TD3.act_parallel(obs[:-1])
-            self.policy.train(obs[:-1], labels, iterative=True)
+    def run_model_basic(self):
+        """Train dynamics model on trajectories from pretrained TD3 expert.
+        """
+        state_dim = self.env.observation_space.shape[0]
+        action_dim = self.env.action_space.shape[0]
+        max_action = float(self.env.action_space.high[0])
+
+        # Restore weights of pretrained policy
+        self.TD3 = TD3(state_dim, action_dim, max_action)
+        try:
+            self.TD3.load(self.env_str, "save/model-free")
+        except:
+            print("Could not load pretrained policy!")
+
+        for step in range(20):
+            # Sample rollout from expert and train model
+            obs, acts, reward_sum = self.sample_rollout(actor='TD3_pretrained')
+            metrics = self.mpc.train(obs, acts, iterative=True)
+            print("Test", metrics["model/mse/test"].mean())
+            print("Train", metrics["model/mse/train"][-1].mean())
+            print("Val", metrics["model/mse/val"][-1].mean())
+
+            self.logger.log_scalar("model/mse/test", metrics["model/mse/test"].mean(), step)
+            self.logger.log_scalar("model/mse/train", metrics["model/mse/train"][-1].mean(), step)
+            self.logger.log_scalar("model/mse/val", metrics["model/mse/val"][-1].mean(), step)
+
 
     def run_experiment(self, algo):
         """Learn parameterized policy by behavior cloning on trajectories generated by

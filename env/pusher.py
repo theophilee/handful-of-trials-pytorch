@@ -10,6 +10,7 @@ class PusherEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         mujoco_env.MujocoEnv.__init__(self, '%s/assets/pusher.xml' % dir_path, 4)
         utils.EzPickle.__init__(self)
         self.reset_model()
+        self._max_episode_steps = 150
 
     def _step(self, a):
         obj_pos = self.get_body_com("object"),

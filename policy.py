@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 from torch.optim import Adam
 from torch.utils.data import TensorDataset, DataLoader
@@ -12,23 +11,24 @@ ACTIVATIONS = {'relu': nn.ReLU(), 'swish': Swish(), 'tanh':nn.Tanh()}
 
 
 class Policy:
-    def __init__(self, env, hid_features, activation, train_epochs, batch_size,
-                 lr, weight_decay):
+    def __init__(self, param_str, env, hid_features, activation, batch_size, lr, weight_decay):
         """Parameterized reactive policy.
-            .env (gym.env): Environment for which this policy will be used.
-            .hid_features (int list): size of each hidden layer, can be empty
-            .activation: activation function, one of 'relu', 'swish', 'tanh'
-            .train_epochs (int): Number of epochs of training each time we refit
-                the policy.
-            .batch_size (int): Batch size.
-            .lr (float): Learning rate for optimizer.
-            .weight_decay (float): Weight decay for policy parameters.
+
+        Arguments:
+            param_str (str): String descriptor of experiment hyper-parameters.
+            env (gym.env): Environment for which this policy will be used.
+            hid_features (int list): size of each hidden layer, can be empty
+            activation: activation function, one of 'relu', 'swish', 'tanh'
+            batch_size (int): Batch size.
+            lr (float): Learning rate for optimizer.
+            weight_decay (float): Weight decay for policy parameters.
         """
         # TODO add observation pre-processing as for model?
+        # TODO add output non-linearity?
+        self.ckpt_file = param_str + '_ckpt.pt'
         self.obs_features = env.observation_space.shape[0]
         self.act_features = env.action_space.shape[0]
         self.act_high, self.act_low = env.action_space.high, env.action_space.low
-        self.train_epochs = train_epochs
         self.batch_size = batch_size
 
         self.net = self._make_network(self.obs_features, self.act_features,
@@ -37,11 +37,11 @@ class Policy:
         self.optim = Adam(self.net.parameters(), lr=lr, weight_decay=weight_decay)
         self.criterion = nn.MSELoss()
 
+        # Dataset to train policy
         self.X = torch.empty((0, self.obs_features))
         self.Y = torch.empty((0, self.act_features))
     
     def _make_network(self, obs_features, act_features, hid_features, activation):
-        # TODO might need to add an output activation?
         if len(hid_features) > 0:
             layers = []
 
@@ -60,56 +60,68 @@ class Policy:
         self.X = torch.empty((0, self.obs_features))
         self.Y = torch.empty((0, self.act_features))
 
-    def train(self, obs, acts, train_split=0.8, iterative=False):
+    def train(self, obs, acts, train_split=0.9, iterative=True):
+        X_new = torch.from_numpy(obs).float()
+        Y_new = torch.from_numpy(acts).float()
+
         if iterative:
             # Add new data to training set
-            self.X = torch.cat((self.X, torch.from_numpy(obs).float()))
-            self.Y = torch.cat((self.Y, torch.from_numpy(acts).float()))
+            self.X = torch.cat((self.X, X_new))
+            self.Y = torch.cat((self.Y, Y_new))
         else:
-            self.X = torch.from_numpy(obs).float()
-            self.Y = torch.from_numpy(acts).float()
+            self.X = X_new
+            self.Y = Y_new
 
         # Compute input statistics for normalization
         num_train = int(self.X.size(0) * train_split)
         self._fit_input_stats(self.X[:num_train])
+
+        if iterative:
+            # Compute mse on new test data
+            test_mse = self.criterion(self.predict(X_new.to(TORCH_DEVICE)),
+                                      Y_new.to(TORCH_DEVICE)).item()
 
         train_dataset = TensorDataset(self.X[:num_train], self.Y[:num_train])
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
         test_dataset = TensorDataset(self.X[num_train:], self.Y[num_train:])
         test_loader = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=True)
 
-        train_mses, test_mses = [], []
-        early_stopping = EarlyStopping()
+        train_mses, val_mses = [], []
+        early_stopping = EarlyStopping(ckpt_file=self.ckpt_file, patience=10)
 
-        # Train until test error stops decreasing
+        # Training loop
         while not early_stopping.early_stop:
-            train_mse = 0
-            for (X, Y) in train_loader:
+            train_mse = np.zeros(len(train_loader))
+            val_mse = np.zeros(len(test_loader))
+
+            for i, (X, Y) in enumerate(train_loader):
                 loss = self.criterion(self.predict(X.to(TORCH_DEVICE)), Y.to(TORCH_DEVICE))
-                train_mse += loss.item()
+                train_mse[i] = loss.item()
 
                 # Take a gradient step
                 self.optim.zero_grad()
                 loss.backward()
                 self.optim.step()
 
-            train_mses.append(train_mse / len(train_loader))
-
-            test_mse = 0
-            for (X, Y) in test_loader:
+            for i, (X, Y) in enumerate(test_loader):
                 loss = self.criterion(self.predict(X.to(TORCH_DEVICE)), Y.to(TORCH_DEVICE))
-                test_mse += loss.item()
+                val_mse[i] = loss.item()
 
-            test_mses.append(test_mse / len(test_loader))
-            early_stopping(test_mse / len(test_loader), self.net)
+            train_mses.append(np.mean(train_mse))
+            val_mses.append(np.mean(val_mse))
+
+            # Stop if validation error stops decreasing
+            early_stopping(np.mean(val_mse), self.net)
 
         # Load policy with best validation loss
         early_stopping.load_best(self.net)
 
-        # Record train/test MSE for each epoch
+        # Record train/val/test MSE for each epoch
         metrics = OrderedDict()
         metrics["policy/mse/train"] = train_mses
-        metrics["policy/mse/test"] = test_mses
+        metrics["policy/mse/val"] = val_mses
+        if iterative:
+            metrics["policy/mse/test"] = test_mse
 
         return metrics
 

@@ -9,6 +9,7 @@ class CartpoleEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         dir_path = os.path.dirname(os.path.realpath(__file__))
         mujoco_env.MujocoEnv.__init__(self, '%s/assets/cartpole.xml' % dir_path, 2)
         utils.EzPickle.__init__(self)
+        self._max_episode_steps = 200
 
     def _step(self, a):
         self.do_simulation(a, self.frame_skip)
@@ -16,7 +17,7 @@ class CartpoleEnv(mujoco_env.MujocoEnv, utils.EzPickle):
 
         cost_lscale = 0.6
         reward_obs = np.exp(-np.sum(np.square(self._get_ee_pos(ob) - np.array([0.0, 0.6]))) / (cost_lscale ** 2))
-        reward_act = 0.01 * np.sum(np.square(a))
+        reward_act = -0.01 * np.sum(np.square(a))
         reward = reward_obs + reward_act
 
         done = False

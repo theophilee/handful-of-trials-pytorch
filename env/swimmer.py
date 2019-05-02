@@ -9,13 +9,14 @@ class SwimmerEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         dir_path = os.path.dirname(os.path.realpath(__file__))
         mujoco_env.MujocoEnv.__init__(self, '%s/assets/swimmer.xml' % dir_path, 4)
         utils.EzPickle.__init__(self)
+        self._max_episode_steps = 1000
 
     def _step(self, act):
         self.prev_qpos = np.copy(self.model.data.qpos.flat)
         self.do_simulation(act, self.frame_skip)
         ob = self._get_obs()
 
-        reward_act = -0.0001 * np.square(act).sum()
+        reward_act = -1e-4 * np.square(act).sum()
         reward_fwd = ob[0]
         reward = reward_fwd + reward_act
 

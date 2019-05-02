@@ -7,11 +7,6 @@ from dotmap import DotMap
 class Config:
     def __init__(self):
         self.env = gym.make("MyHalfCheetah-v0")
-        self.task_hor = 1000
-        self.num_rollouts = 300
-        self.in_features, self.out_features = 24, 18
-
-        self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
     def obs_preproc(self, obs):
         if isinstance(obs, np.ndarray):
@@ -40,14 +35,13 @@ class Config:
 
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,
-                          "task_hor": self.task_hor,
-                          "num_rollouts": self.num_rollouts,
+                          "num_rollouts": 300,
                           "num_imagined_rollouts": 2})
 
         model_cfg = DotMap({"ensemble_size": 1,
-                            "in_features": self.in_features,
-                            "out_features": self.out_features,
-                            "hid_features": [200, 200],
+                            "in_features": 24,
+                            "out_features": 18,
+                            "hid_features": [200, 200, 200, 200],
                             "activation": "relu",
                             "lr": 1e-3,
                             "weight_decay": 1e-4})
@@ -61,7 +55,6 @@ class Config:
         mpc_cfg = DotMap({"env": self.env,
                           "plan_hor": 30,
                           "num_part": 20,
-                          "train_epochs": 5,
                           "batch_size": 32,
                           "obs_preproc": self.obs_preproc,
                           "pred_postproc": self.pred_postproc,
@@ -74,7 +67,6 @@ class Config:
         policy_cfg = DotMap({"env": self.env,
                              "hid_features": [400, 300],
                              "activation": "relu",
-                             "train_epochs": 20,
                              "batch_size": 250,
                              "lr": 1e-3,
                              "weight_decay": 0.})

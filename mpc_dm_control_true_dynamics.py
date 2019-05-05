@@ -9,14 +9,14 @@ from dm_control import suite
 import numpy as np
 from multiprocessing import Pool
 from functools import partial
+import scipy.stats
 
 
 class ActionRepeat(object):
     def __init__(self, env, amount):
         self._env = env
         self._amount = amount
-        self._last_action = None
-        
+
     def __getattr__(self, name):
         return getattr(self._env, name)
     
@@ -28,7 +28,6 @@ class ActionRepeat(object):
             time_step = self._env.step(action)
             reward += time_step.reward
             discount *= time_step.discount
-        
             if time_step.last():
                 break
         
@@ -41,7 +40,6 @@ class ActionRepeat(object):
         return time_step
 
     def reset(self, *args, **kwargs):
-        self._last_action = None
         return self._env.reset(*args, **kwargs)
 
 
@@ -63,16 +61,25 @@ def evaluate(actions, state):
     return score
 
 
-def cem_planner(pool, action_spec, state, horizon, proposals, topk, iterations):
+def cem_planner(pool, action_spec, state, horizon, proposals, topk, iterations, distribution):
+    # Actions in [-1, 1] range for all dm-control environments
+    action_bound = 1
     mean = np.zeros((horizon,) + action_spec.shape)
-    std = np.ones((horizon,) + action_spec.shape)
+    std = np.ones((horizon,) + action_spec.shape) * action_bound
 
-    for _ in range(5):
-        plans = [np.random.normal(mean, std) for _ in range(proposals)]
+    for _ in range(iterations):
+        if distribution == 'norm':
+            plans = np.random.normal(mean, std, size=(proposals,) + mean.shape)
+        if distribution == 'truncnorm':
+            # Truncated normal to keep actions in range -> bad idea
+            dist =  scipy.stats.truncnorm(
+                (-action_bound - mean) / std, (action_bound - mean) / std, mean, std)
+            plans = dist.rvs(size=(proposals,) + mean.shape)
+
         scores = pool.map(partial(evaluate, state=state), plans)
-        plans = np.array(plans)[np.argsort(scores)]
+        plans = plans[np.argsort(scores)]
         mean, std = plans[-topk:].mean(axis=0), plans[-topk:].std(axis=0)
-        
+
     return mean[0]
 
 
@@ -83,27 +90,21 @@ def main(args):
     # Pool of workers, each has its own copy of global environment variable
     pool = Pool(32, initializer, [env])
 
-    scores, durations = [], []
+    scores = []
     for _ in range(args.episodes):
-        durations.append(0)
         scores.append(0)
         time_step = env.reset()
 
         while not time_step.last():
             state = (env.physics.data.qpos, env.physics.data.qvel)
-            action = cem_planner(pool, env.action_spec(), state, args.horizon,
-                                 args.proposals, args.topk, args.iterations)
-            print(action)
+            action = cem_planner(pool, env.action_spec(), state, args.horizon, args.proposals,
+                                 args.topk, args.iterations, args.distribution)
             time_step = env.step(action)
-            durations[-1] += 1
             scores[-1] += time_step.reward
 
-    durations = np.array(durations)
     scores = np.array(scores)
-    
-    print(durations)
+
     print(scores)
-    print('Mean episode length:', durations.mean())
     print('Mean score:         ', scores.mean())
     print('Standard deviation: ', scores.std())
 
@@ -116,7 +117,7 @@ if __name__ == '__main__':
                         help='Name of the task to load.')
     parser.add_argument('-r', '--repeat', type=int, default=4, 
                         help='Number of times to repeat each action for.')
-    parser.add_argument('-e', '--episodes', type=int, default=1, 
+    parser.add_argument('-e', '--episodes', type=int, default=1,
                         help='Number of episodes to average over.')
     parser.add_argument('-l', '--horizon', type=int, default=12, 
                         help='Length of each action sequence to consider.')
@@ -126,5 +127,9 @@ if __name__ == '__main__':
                         help='Number of best action sequences to refit belief to.')
     parser.add_argument('-i', '--iterations', type=int, default=10,
                         help='Number of optimization iterations for each action sequence.')
+    parser.add_argument('--distribution', type=str, default='norm',
+                        help='Distribution to refit, one of "norm", "truncnorm".')
+    parser.add_argument('--logdir', type=str, default='runs/mpc_dm_control_true_dynamics',
+                        help='Log directory for tensorboard.')
     args = parser.parse_args()
     main(args)

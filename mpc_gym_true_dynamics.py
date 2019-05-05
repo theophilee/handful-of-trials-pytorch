@@ -1,18 +1,38 @@
 """
 CEM planning on gym environments using the ground truth dynamics.
 Example usage:
-python mpc_gym_true_dynamics.py halfcheetah run -r 4 -l 12
+python mpc_gym_true_dynamics.py MyHalfCheetah-v2 -r 4 -l 12
 """
+import os
 import argparse
 import env # Register environments
 import numpy as np
 from multiprocessing import Pool
+from functools import partial
 import gym
-import copy
 
+from utils import Logger
 
-# TODO add action repeat
-# TODO find optimal CEM hyper-parameters for each environment
+class ActionRepeat(object):
+    def __init__(self, env, amount):
+        self._env = env
+        self._amount = amount
+        self._env._max_episode_steps = self._env._max_episode_steps // amount
+        
+    def __getattr__(self, name):
+        return getattr(self._env, name)
+    
+    def step(self, action):
+        total_reward = 0
+        
+        for _ in range(self._amount):
+            obs, reward, _, _ = self._env.step(action)
+            total_reward += reward
+        
+        return obs, total_reward, False, {}
+
+    def reset(self, *args, **kwargs):
+        return self._env.reset(*args, **kwargs)
 
 
 def initializer(env):
@@ -20,79 +40,78 @@ def initializer(env):
     global_env = env
 
 
-def evaluate(actions):
-    # Cannot reset state in gym -> copy environment
-    env = copy.deepcopy(global_env)
+def evaluate(actions, state):
+    global_env.reset()
+    global_env.sim.set_state(state)
+
     score = 0
     for action in actions:
-        _, reward, _, _ = env.step(action)
+        _, reward, _, _ = global_env.step(action)
         score += reward
     return score
 
 
-def cem_planner(pool, action_shape, horizon, proposals, topk, iterations):
-    mean = np.zeros((horizon,) + action_shape)
-    std = np.ones((horizon,) + action_shape)
+def cem_planner(pool, action_space, state, horizon, proposals, topk, iterations):
+    action_bound = action_space.high[0]
+    mean = np.zeros((horizon,) + action_space.shape)
+    std = np.ones((horizon,) + action_space.shape) * action_bound
 
     for _ in range(iterations):
-        plans = [np.random.normal(mean, std) for _ in range(proposals)]
-        scores = pool.map(evaluate, plans)
-        plans = np.array(plans)[np.argsort(scores)]
+        plans = np.random.normal(mean, std, size=(proposals,) + mean.shape)
+        scores = pool.map(partial(evaluate, state=state), plans)
+        plans = plans[np.argsort(scores)]
         mean, std = plans[-topk:].mean(axis=0), plans[-topk:].std(axis=0)
 
     return mean[0]
 
 
 def main(args):
-    if args.env == "halfcheetah":
-        env = gym.make("MyHalfCheetah-v0")
-    elif args.env == "cartpole":
-        env = gym.make("MyCartpole-v0")
-    else:
-        raise NotImplementedError
+    env = gym.make(args.env)
+    env = ActionRepeat(env, args.repeat)
 
-    scores, durations = [], []
+    # Pool of workers, each has its own copy of global environment variable
+    pool = Pool(32, initializer, [env])
+
+    scores = []
     for _ in range(args.episodes):
-        durations.append(0)
         scores.append(0)
         env.reset()
 
         for _ in range(env._max_episode_steps):
-            # Pool of workers, each has its own copy of global environment variable
-            pool = Pool(32, initializer, [env])
-            action = cem_planner(pool, env.action_space.shape, args.horizon, args.proposals,
+            state = env.sim.get_state()
+            action = cem_planner(pool, env.action_space, state, args.horizon, args.proposals,
                                  args.topk, args.iterations)
-            pool.close()
             _, reward, _, _ = env.step(action)
-            print(reward)
-            durations[-1] += 1
             scores[-1] += reward
 
-    durations = np.array(durations)
     scores = np.array(scores)
 
-    print(durations)
     print(scores)
-    print('Mean episode length:', durations.mean())
     print('Mean score:         ', scores.mean())
     print('Standard deviation: ', scores.std())
+
+    param_str = '%s' % (args.repeat)
+    logger = Logger(os.path.join(args.logdir, param_str))
+    logger.log_scalar("scores", scores.mean(), 0)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('env',
-                        help='Name of the environment to load.')
-    parser.add_argument('-r', '--repeat', type=int, default=4,
+                        help='OpenAI gym environment to load.')
+    parser.add_argument('-r', '--repeat', type=int, default=4, 
                         help='Number of times to repeat each action for.')
     parser.add_argument('-e', '--episodes', type=int, default=1,
                         help='Number of episodes to average over.')
-    parser.add_argument('-l', '--horizon', type=int, default=25,
+    parser.add_argument('-l', '--horizon', type=int, default=12,
                         help='Length of each action sequence to consider.')
-    parser.add_argument('-p', '--proposals', type=int, default=500,
+    parser.add_argument('-p', '--proposals', type=int, default=1000,
                         help='Number of action sequences to evaluate per iteration.')
-    parser.add_argument('-k', '--topk', type=int, default=50,
+    parser.add_argument('-k', '--topk', type=int, default=100,
                         help='Number of best action sequences to refit belief to.')
     parser.add_argument('-i', '--iterations', type=int, default=10,
                         help='Number of optimization iterations for each action sequence.')
+    parser.add_argument('--logdir', type=str, default='runs/mpc_gym_true_dynamics',
+                        help='Log directory for tensorboard.')
     args = parser.parse_args()
     main(args)

@@ -9,10 +9,9 @@ class SwimmerEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         dir_path = os.path.dirname(os.path.realpath(__file__))
         mujoco_env.MujocoEnv.__init__(self, '%s/assets/swimmer.xml' % dir_path, 4)
         utils.EzPickle.__init__(self)
-        self._max_episode_steps = 1000
 
-    def _step(self, act):
-        self.prev_qpos = np.copy(self.model.data.qpos.flat)
+    def step(self, act):
+        self.prev_qpos = np.copy(self.sim.data.qpos.flat)
         self.do_simulation(act, self.frame_skip)
         ob = self._get_obs()
 
@@ -26,14 +25,14 @@ class SwimmerEnv(mujoco_env.MujocoEnv, utils.EzPickle):
     def _get_obs(self):
         # Added first dimension of obs to be able to compute the reward from obs
         return np.concatenate([
-            (self.model.data.qpos.flat[:1] - self.prev_qpos[:1]) / self.dt,
-            self.model.data.qpos.flat[2:],
-            self.model.data.qvel.flat
+            (self.sim.data.qpos.flat[:1] - self.prev_qpos[:1]) / self.dt,
+            self.sim.data.qpos.flat[2:],
+            self.sim.data.qvel.flat
         ])
 
     def reset_model(self):
         qpos = self.init_qpos + self.np_random.uniform(low=-.1, high=.1, size=self.model.nq)
         qvel = self.init_qvel + self.np_random.uniform(low=-.1, high=.1, size=self.model.nv)
         self.set_state(qpos, qvel)
-        self.prev_qpos = np.copy(self.model.data.qpos.flat)
+        self.prev_qpos = np.copy(self.sim.data.qpos.flat)
         return self._get_obs()

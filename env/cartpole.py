@@ -11,7 +11,7 @@ class CartpoleEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         utils.EzPickle.__init__(self)
         self._max_episode_steps = 200
 
-    def _step(self, a):
+    def step(self, a):
         self.do_simulation(a, self.frame_skip)
         ob = self._get_obs()
 
@@ -30,7 +30,8 @@ class CartpoleEnv(mujoco_env.MujocoEnv, utils.EzPickle):
         return self._get_obs()
 
     def _get_obs(self):
-        return np.concatenate([self.model.data.qpos, self.model.data.qvel]).ravel()
+        return np.concatenate([self.sim.data.qpos,
+                               self.sim.data.qvel]).ravel()
 
     @staticmethod
     def _get_ee_pos(x):

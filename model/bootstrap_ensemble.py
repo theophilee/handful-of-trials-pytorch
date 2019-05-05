@@ -70,7 +70,7 @@ class BootstrapEnsemble:
         loss = xentropy.mean()
 
         # Special regularization for max and min log variance parameters
-        # TODO is special regularization for max and min log variance parameters important?
+        # TODO how important is special regularization for max and min log variance?
         loss += 0.01 * (self.net[-1].max_logvar.sum() - self.net[-1].min_logvar.sum())
 
         # Take a gradient step

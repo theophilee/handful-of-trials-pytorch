@@ -6,7 +6,8 @@ from dotmap import DotMap
 
 class Config:
     def __init__(self):
-        self.env = gym.make("MyHalfCheetah-v0")
+        # TODO add action repeat wrapper
+        self.env = gym.make("MyHalfCheetah-v2")
 
     def obs_preproc(self, obs):
         if isinstance(obs, np.ndarray):
@@ -46,11 +47,9 @@ class Config:
                             "lr": 1e-3,
                             "weight_decay": 1e-4})
 
-        opt_cfg = DotMap({"max_iters": 5,
+        opt_cfg = DotMap({"iterations": 5,
                           "popsize": 500,
-                          "num_elites": 50,
-                          "epsilon": 0.01,
-                          "alpha": 0.1})
+                          "num_elites": 50})
 
         mpc_cfg = DotMap({"env": self.env,
                           "plan_hor": 30,
@@ -60,7 +59,6 @@ class Config:
                           "pred_postproc": self.pred_postproc,
                           "targ_proc": self.targ_proc,
                           "get_cost": self.get_cost,
-                          "reset_fns": [],
                           "model_cfg": model_cfg,
                           "opt_cfg": opt_cfg})
 
@@ -76,4 +74,3 @@ class Config:
                       "policy_cfg": policy_cfg})
 
         return cfg
-

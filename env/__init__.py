@@ -3,30 +3,24 @@ from gym.envs.registration import register
 
 register(
     id='MyCartpole-v0',
-    entry_point='env.cartpole:CartpoleEnv'
+    entry_point='env.cartpole:CartpoleEnv',
+    max_episode_steps=200,
 )
 
 register(
-    id='MyHalfCheetah-v0',
-    entry_point='env.half_cheetah:HalfCheetahEnv'
+    id='MyHalfCheetah-v2',
+    entry_point='env.half_cheetah:HalfCheetahEnv',
+    max_episode_steps=1000,
 )
 
 register(
-    id='MySwimmer-v0',
-    entry_point='env.swimmer:SwimmerEnv'
+    id='MySwimmer-v2',
+    entry_point='env.swimmer:SwimmerEnv',
+    max_episode_steps=1000,
 )
 
 register(
-    id='MyReacher3D-v0',
-    entry_point='env.reacher3D:Reacher3DEnv'
-)
-
-register(
-    id='MyPusher-v0',
-    entry_point='env.pusher:PusherEnv'
-)
-
-register(
-    id='MyHopper-v0',
-    entry_point='env.pusher:PusherEnv'
+    id='MyHopper-v2',
+    entry_point='env.hopper:HopperEnv',
+    max_episode_steps=1000,
 )

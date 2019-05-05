@@ -1,19 +1,6 @@
 import torch
 import torch.nn as nn
-import numpy as np
-import tensorflow as tf
-
-
-# TODO use truncnorm from scipy.stats instead of tensorflow, or get rid if this initialization
-def truncated_normal(size, std):
-    # This initialization does not exist in pytorch and is important for rapid early training in cartpole.
-    # Sample from a Gaussian and reject samples more than two standard deviations away from the mean.
-    cfg = tf.ConfigProto()
-    cfg.gpu_options.allow_growth = True
-    sess = tf.Session(config=cfg)
-    val = sess.run(tf.truncated_normal(shape=size, stddev=std))
-    sess.close()
-    return torch.tensor(val, dtype=torch.float32)
+import math
 
 
 class BootstrapLinear(nn.Module):
@@ -37,9 +24,15 @@ class BootstrapLinear(nn.Module):
                 (ensemble_size, out_features) initialized as zero
         """
         super().__init__()
-        self.weight = nn.Parameter(truncated_normal(size=(ensemble_size, in_features, out_features),
-                                                    std=1.0 / (2.0 * np.sqrt(in_features))))
-        self.bias = nn.Parameter(torch.zeros([ensemble_size, 1, out_features], dtype=torch.float32))
+        self.weight = nn.Parameter(torch.Tensor(ensemble_size, in_features, out_features))
+        self.bias = nn.Parameter(torch.Tensor(out_features))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+        bound = 1 / math.sqrt(fan_in)
+        nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, input):
         return input.matmul(self.weight) + self.bias

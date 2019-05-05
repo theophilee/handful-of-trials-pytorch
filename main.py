@@ -1,8 +1,6 @@
 import argparse
 
-# To register environments
-import env
-
+import env # To register environments
 from controller import MPC
 from policy import Policy
 from experiment import Experiment
@@ -11,25 +9,19 @@ from config import get_config
 from utils import *
 
 
-ALLOWED_ENVS = ["cartpole", "halfcheetah", "reacher3D", "pusher", "hopper", "swimmer"]
+ALLOWED_ENVS = ["cartpole", "half_cheetah", "hopper", "swimmer"]
 
 
 def main(args):
     assert args.env in ALLOWED_ENVS
 
-    # Set random seeds
-    set_random_seeds(0)
-
-    # Create log and save directories
-    create_directories([args.logdir, args.savedir])
+    set_random_seeds(args.seed)
 
     # Get configuration for environment
     cfg = get_config(args.env)
 
-    # Overwrite configuration with command line arguments (optional)
-    #param_str = ""
-    param_str = "{}".format(str(args.ensemble_size))
-    cfg.mpc_cfg.model_cfg.ensemble_size = args.ensemble_size
+    # Overwrite configuration with command line arguments
+    param_str = ""
 
     # Model predictive control policy
     mpc = MPC(param_str, cfg.mpc_cfg)
@@ -39,22 +31,18 @@ def main(args):
 
     # Run experiment
     exp = Experiment(mpc, policy, args.env, param_str, args.logdir, args.savedir, cfg.exp_cfg)
-    #exp.run_mpc_baseline()
-    #exp.run_mpc_true_dynamics()
-    #exp.run_pretrained_policy()
-    #exp.run_behavior_cloning_basic()
-    #exp.run_dagger_basic()
     exp.run_mpc_baseline()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, default='cartpole',
-                        help='Env name: one of {}'.format(ALLOWED_ENVS))
-    parser.add_argument('--logdir', type=str, default='runs/model-based',
-                        help='Log directory for Tensorboard')
-    parser.add_argument('--savedir', type=str, default='save/model-based',
-                        help='Save directory')
-    parser.add_argument('--ensemble-size', type=int, default=5)
+                        help='Env name: one of {}.'.format(ALLOWED_ENVS))
+    parser.add_argument('--logdir', type=str, default='runs/main',
+                        help='Log directory for Tensorboard.')
+    parser.add_argument('--savedir', type=str, default='save/main',
+                        help='Save directory.')
+    parser.add_argument('--seed', type=int, default=0,
+                        help='Random seed.')
     args = parser.parse_args()
 
     main(args)

@@ -1,76 +1,46 @@
-import numpy as np
-import scipy.stats as stats
+import torch
+from torch.distributions import Normal
+
+from utils import TORCH_DEVICE
 
 
 class CEMOptimizer:
-    def __init__(self, max_iters, popsize, num_elites, upper_bound, lower_bound,
-                 epsilon=0.001, alpha=0.25):
+    def __init__(self, action_space, horizon, popsize, num_elites, iterations):
         """Cross-entropy method optimizer.
 
         Arguments:
-            max_iters (int): The maximum number of iterations to perform during optimization
+            action_space: OpenAI gym action space.
+            horizon (int): Planning horizon.
             popsize (int): The number of candidate solutions to be sampled at every iteration
             num_elites (int): The number of top solutions that will be used to obtain the
                 distribution at the next iteration.
-            upper_bound (np.ndarray): An array of upper bounds
-            lower_bound (np.ndarray): An array of lower bounds
-            epsilon (float): If the maximum variance drops below epsilon, optimization is
-                stopped.
-            alpha (float): Controls how much of the previous mean and variance is used for
-                the next iteration.
-                next_mean = alpha * old_mean + (1 - alpha) * elite_mean
+            iterations (int): The number of iterations to perform during optimization.
         """
-        self.max_iters = max_iters
+        self.act_bound = action_space.high[0]
+        self.action_shape = action_space.shape
+        self.horizon = horizon
         self.popsize = popsize
         self.num_elites = num_elites
-        self.upper_bound, self.lower_bound, = upper_bound, lower_bound
-        self.init_var = np.square(self.upper_bound - self.lower_bound) / 16
-        self.sol_dim = self.init_var.shape[0]
-        self.epsilon = epsilon
-        self.alpha = alpha
+        self.iterations = iterations
 
         assert num_elites <= popsize, "Number of elites must be at most the population size."
 
-    def obtain_solution(self, init_mean, cost_function):
-        """ Optimize multiple CEM problems in parallel (parallel cost function computation)
-        using the provided initial candidate distributions.
+    def obtain_solution(self, start_obs, cost_function):
+        """Optimize multiple CEM planning instances in parallel.
 
         Arguments:
-            init_mean (2D np.ndarray): The means of the initial candidate distributions of
-                shape (num_problems, sol_dim).
-            cost_function (3D np.ndarray -> 2D np.ndarray): Function used to compute cost
-                of solutions to multiple problems in parallel.
+            start_obs (2D torch.Tensor): Starting observations from which to enroll plans of
+                shape (num_obs, obs_features).
+            cost_function: Function to compute cost of plans.
         """
-        mean, var, t = init_mean, self.init_var, 0
-        num_problems = init_mean.shape[0]
-        distrib = stats.truncnorm(-2, 2, loc=np.zeros_like(mean), scale=np.ones_like(mean))
+        num_obs = start_obs.shape[0]
+        mean = torch.zeros((num_obs, self.horizon) + self.action_shape).to(TORCH_DEVICE)
+        std = torch.ones((num_obs, self.horizon) + self.action_shape).to(TORCH_DEVICE) * self.act_bound
 
-        while (t < self.max_iters) and np.max(var) > self.epsilon:
-            # Constrain variance
-            var_upper_bound = np.minimum(np.square((mean - self.lower_bound) / 2),
-                                         np.square((self.upper_bound - mean) / 2))
-            var = np.minimum(var, var_upper_bound)
-
-            # Sample population and reshape it to (num_problems, popsize, sol_dim)
-            samples = distrib.rvs(size=[self.popsize, *init_mean.shape]) * np.sqrt(var) + mean
-            samples = samples.astype(np.float32).transpose(1, 0, 2)
-
-            # Compute costs for all problems in parallel of shape (num_problems, popsize)
-            costs = cost_function(samples)
-
-            # Select elites for each problem independently
-            elites = []
-            for i in range(num_problems):
-                elites.append(samples[i, np.argsort(costs[i])[:self.num_elites]])
-            elites = np.array(elites)
-
-            # Update distributions
-            new_mean = np.mean(elites, axis=1)
-            new_var = np.var(elites, axis=1)
-
-            mean = self.alpha * mean + (1 - self.alpha) * new_mean
-            var = self.alpha * var + (1 - self.alpha) * new_var
-
-            t += 1
+        for _ in range(self.iterations):
+            plans = Normal(mean, std).sample((self.popsize,)).transpose(0, 1)
+            costs = cost_function(plans, start_obs)
+            elites = torch.stack([p[torch.argsort(c)][:self.num_elites] for p, c in zip(plans, costs)])
+            mean, std = torch.mean(elites, dim=1), torch.std(elites, dim=1)
 
         return mean

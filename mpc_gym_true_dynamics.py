@@ -72,27 +72,31 @@ def main(args):
     # Pool of workers, each has its own copy of global environment variable
     pool = Pool(32, initializer, [env])
 
-    scores = []
-    for _ in range(args.episodes):
-        scores.append(0)
-        env.reset()
+    scores = np.zeros(args.episodes)
+    observations = np.zeros((args.episodes, env._max_episode_steps + 1) + env.observation_space.shape)
+    actions = np.zeros((args.episodes, env._max_episode_steps) + env.action_space.shape)
 
-        for _ in range(env._max_episode_steps):
+    for i in range(args.episodes):
+        observations[i, 0] = env.reset()
+
+        for t in range(env._max_episode_steps):
             state = env.sim.get_state()
-            action = cem_planner(pool, env.action_space, state, args.horizon, args.proposals,
-                                 args.topk, args.iterations)
-            _, reward, _, _ = env.step(action)
-            scores[-1] += reward
+            actions[i, t] = cem_planner(pool, env.action_space, state, args.horizon,
+                                        args.proposals, args.topk, args.iterations)
+            observations[i, t], reward, _, _ = env.step(actions[i, t])
+            scores[i] += reward
 
-    scores = np.array(scores)
+        print(scores[i])
 
-    print(scores)
     print('Mean score:         ', scores.mean())
     print('Standard deviation: ', scores.std())
 
     param_str = '%s' % (args.repeat)
     logger = Logger(os.path.join(args.logdir, param_str))
     logger.log_scalar("scores", scores.mean(), 0)
+
+    np.save('expert_obs', observations)
+    np.save('expert_act', actions)
 
 
 if __name__ == '__main__':
@@ -101,7 +105,7 @@ if __name__ == '__main__':
                         help='OpenAI gym environment to load.')
     parser.add_argument('-r', '--repeat', type=int, default=4, 
                         help='Number of times to repeat each action for.')
-    parser.add_argument('-e', '--episodes', type=int, default=1,
+    parser.add_argument('-e', '--episodes', type=int, default=50,
                         help='Number of episodes to average over.')
     parser.add_argument('-l', '--horizon', type=int, default=12,
                         help='Length of each action sequence to consider.')

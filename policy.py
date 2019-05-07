@@ -87,7 +87,7 @@ class Policy:
         test_loader = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=True)
 
         train_mses, val_mses = [], []
-        early_stopping = EarlyStopping(ckpt_file=self.ckpt_file, patience=10)
+        early_stopping = EarlyStopping(ckpt_file=self.ckpt_file, patience=20)
 
         # Training loop
         while not early_stopping.early_stop:
@@ -145,3 +145,4 @@ class Policy:
         # Store data statistics for normalization
         self.input_mean = torch.mean(input, dim=0, keepdim=True).to(TORCH_DEVICE)
         self.input_std = torch.std(input, dim=0, keepdim=True).to(TORCH_DEVICE)
+        self.input_std.data[self.input_std.data < 1e-12] = 1.0

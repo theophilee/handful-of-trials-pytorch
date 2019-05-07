@@ -24,12 +24,6 @@ def numpy_from_device(tensor):
     return tensor.cpu().detach().numpy()
 
 
-def create_directories(directories):
-    for dir in directories:
-        if not os.path.exists(dir):
-            os.makedirs(dir)
-
-
 class Logger:
     """Logging with TensorboardX.
     """
@@ -57,7 +51,7 @@ class Logger:
 
 class EarlyStopping:
     """Early stops the training if validation loss doesn't improve after a given patience."""
-    def __init__(self, ckpt_file='ckpt.pt', patience=10, verbose=False):
+    def __init__(self, ckpt_file='ckpt.pt', patience=10, verbose=True):
         """
         Args:
             patience (int): How long to wait after last time validation loss improved.

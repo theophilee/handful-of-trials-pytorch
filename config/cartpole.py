@@ -3,10 +3,13 @@ import numpy as np
 import torch
 from dotmap import DotMap
 
+from .action_repeat import ActionRepeat
+
 
 class Config:
     def __init__(self):
-        self.env = gym.make("MyCartpole-v0")
+        env = gym.make("MyCartpole-v0")
+        self.env = ActionRepeat(env, 4)
 
         self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         self.ee_sub = torch.tensor([0.0, 0.6], device=self.device, dtype=torch.float)
@@ -67,7 +70,7 @@ class Config:
                           "opt_cfg": opt_cfg})
 
         policy_cfg = DotMap({"env": self.env,
-                             "hid_features": [200],
+                             "hid_features": [400, 300],
                              "activation": "relu",
                              "batch_size": 250,
                              "lr": 1e-3,

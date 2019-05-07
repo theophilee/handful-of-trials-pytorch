@@ -3,11 +3,14 @@ import numpy as np
 import torch
 from dotmap import DotMap
 
+from .action_repeat import ActionRepeat
+
 
 class Config:
     def __init__(self):
-        # TODO add action repeat wrapper
-        self.env = gym.make("MyHalfCheetah-v2")
+        env = gym.make("MyHalfCheetah-v2")
+        self.env = ActionRepeat(env, 4)
+        # TODO remove pre-processing?
 
     def obs_preproc(self, obs):
         if isinstance(obs, np.ndarray):
@@ -43,7 +46,7 @@ class Config:
                             "in_features": 24,
                             "out_features": 18,
                             "hid_features": [200, 200, 200, 200],
-                            "activation": "relu",
+                            "activation": "swish",
                             "lr": 1e-3,
                             "weight_decay": 1e-4})
 

@@ -13,22 +13,23 @@ import gym
 
 from utils import Logger
 
+
 class ActionRepeat(object):
     def __init__(self, env, amount):
         self._env = env
         self._amount = amount
         self._env._max_episode_steps = self._env._max_episode_steps // amount
-        
+
     def __getattr__(self, name):
         return getattr(self._env, name)
-    
+
     def step(self, action):
         total_reward = 0
-        
+
         for _ in range(self._amount):
             obs, reward, _, _ = self._env.step(action)
             total_reward += reward
-        
+
         return obs, total_reward, False, {}
 
     def reset(self, *args, **kwargs):
@@ -83,8 +84,9 @@ def main(args):
             state = env.sim.get_state()
             actions[i, t] = cem_planner(pool, env.action_space, state, args.horizon,
                                         args.proposals, args.topk, args.iterations)
-            observations[i, t], reward, _, _ = env.step(actions[i, t])
+            observations[i, t + 1], reward, _, _ = env.step(actions[i, t])
             scores[i] += reward
+            #print(reward)
 
         print(scores[i])
 
@@ -95,17 +97,20 @@ def main(args):
     logger = Logger(os.path.join(args.logdir, param_str))
     logger.log_scalar("scores", scores.mean(), 0)
 
-    np.save('expert_obs', observations)
-    np.save('expert_act', actions)
+    path = os.path.join('expert_demonstrations', args.env)
+    if not os.path.exists(path):
+        os.makedirs(path)
+    np.save(os.path.join(path, 'expert_obs'), observations)
+    np.save(os.path.join(path, 'expert_act'), actions)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('env',
                         help='OpenAI gym environment to load.')
-    parser.add_argument('-r', '--repeat', type=int, default=4, 
+    parser.add_argument('-r', '--repeat', type=int, default=4,
                         help='Number of times to repeat each action for.')
-    parser.add_argument('-e', '--episodes', type=int, default=50,
+    parser.add_argument('-e', '--episodes', type=int, default=20,
                         help='Number of episodes to average over.')
     parser.add_argument('-l', '--horizon', type=int, default=12,
                         help='Length of each action sequence to consider.')

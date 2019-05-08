@@ -78,7 +78,7 @@ class Experiment:
         # Load expert demonstrations
         path = os.path.join('expert_demonstrations', self.env_str)
         obs = np.load(os.path.join(path, 'expert_obs.npy'))
-        acts = np.load(os.path.join(path, 'expert_act_clipped.npy'))
+        acts = np.load(os.path.join(path, 'expert_act.npy'))
         obs = obs[:, :-1].reshape(-1, self.env.observation_space.shape[0])
         acts = acts.reshape(-1, self.env.action_space.shape[0])
 

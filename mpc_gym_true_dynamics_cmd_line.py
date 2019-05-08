@@ -1,7 +1,7 @@
 """
 CEM planning on gym environments using the ground truth dynamics.
 Example usage:
-python mpc_gym_true_dynamics.py MyHalfCheetah-v2 -r 4 -l 12
+python mpc_gym_true_dynamics_cmd_line.py MyHalfCheetah-v2 -r 4 -l 12
 """
 import os
 import argparse
@@ -10,8 +10,6 @@ import numpy as np
 from multiprocessing import Pool
 from functools import partial
 import gym
-
-from utils import Logger
 
 
 class ActionRepeat(object):
@@ -59,11 +57,11 @@ def cem_planner(pool, action_space, state, horizon, proposals, topk, iterations)
 
     for _ in range(iterations):
         plans = np.random.normal(mean, std, size=(proposals,) + mean.shape)
-        scores = pool.map(partial(evaluate, state=state), plans)
+        scores = pool.map(partial(evaluate, state=state), plans.clip(-action_bound, action_bound))
         plans = plans[np.argsort(scores)]
         mean, std = plans[-topk:].mean(axis=0), plans[-topk:].std(axis=0)
 
-    return mean[0]
+    return mean[0].clip(-action_bound, action_bound)
 
 
 def main(args):
@@ -86,16 +84,11 @@ def main(args):
                                         args.proposals, args.topk, args.iterations)
             observations[i, t + 1], reward, _, _ = env.step(actions[i, t])
             scores[i] += reward
-            #print(reward)
 
         print(scores[i])
 
     print('Mean score:         ', scores.mean())
     print('Standard deviation: ', scores.std())
-
-    param_str = '%s' % (args.repeat)
-    logger = Logger(os.path.join(args.logdir, param_str))
-    logger.log_scalar("scores", scores.mean(), 0)
 
     path = os.path.join('expert_demonstrations', args.env)
     if not os.path.exists(path):
@@ -110,7 +103,7 @@ if __name__ == '__main__':
                         help='OpenAI gym environment to load.')
     parser.add_argument('-r', '--repeat', type=int, default=4,
                         help='Number of times to repeat each action for.')
-    parser.add_argument('-e', '--episodes', type=int, default=20,
+    parser.add_argument('-e', '--episodes', type=int, default=1,
                         help='Number of episodes to average over.')
     parser.add_argument('-l', '--horizon', type=int, default=12,
                         help='Length of each action sequence to consider.')

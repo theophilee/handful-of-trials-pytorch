@@ -61,5 +61,6 @@ fabric.properties
 __pycache__/
 save/
 runs/
+.ipynb_checkpoints/
 *.lprof
 .DS_Store

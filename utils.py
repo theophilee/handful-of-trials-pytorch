@@ -91,3 +91,4 @@ class EarlyStopping:
 
     def load_best(self, model):
         model.load_state_dict(torch.load(self.ckpt_file))
+        os.remove(self.ckpt_file)

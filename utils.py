@@ -3,6 +3,7 @@ import shutil
 import random
 import torch
 import numpy as np
+import uuid
 from tensorboardX import SummaryWriter
 
 
@@ -51,44 +52,47 @@ class Logger:
 
 class EarlyStopping:
     """Early stops the training if validation loss doesn't improve after a given patience."""
-    def __init__(self, ckpt_file='ckpt.pt', patience=10, verbose=True):
+    def __init__(self, patience=10, verbose=True):
         """
-        Args:
+        Arguments:
             patience (int): How long to wait after last time validation loss improved.
             verbose (bool): If True, prints a message for each validation loss improvement.
         """
         self.patience = patience
         self.verbose = verbose
-        self.counter = 0
-        self.best_score = None
         self.early_stop = False
         self.val_loss_min = np.Inf
-        self.ckpt_file = ckpt_file
+        self.ckpt_file = str(uuid.uuid1()) + '.ckpt'
 
-    def __call__(self, val_loss, model):
-        score = -val_loss
-
-        if self.best_score is None:
-            self.best_score = score
-            self.save_ckpt(val_loss, model)
-        elif score < self.best_score:
+    def step(self, val_loss, model, info={}):
+        """
+        Arguments:
+            val_loss (float): Validation loss.
+            model (torch.nn.Module): Network to save if validation loss decreases.
+            info (dict): Dictionary with extra information, to be loaded at the end.
+        """
+        if val_loss >= self.val_loss_min:
             self.counter += 1
             if self.verbose:
                 print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
             if self.counter >= self.patience:
                 self.early_stop = True
         else:
-            self.best_score = score
-            self.save_ckpt(val_loss, model)
+            self._save_ckpt(val_loss, model, info)
+            self.val_loss_min = val_loss
             self.counter = 0
 
-    def save_ckpt(self, val_loss, model):
-        # Saves model when validation loss decreases
+    def _save_ckpt(self, val_loss, model, info):
+        # Save model and additional info when validation loss decreases
         if self.verbose:
             print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}), saving model.')
         torch.save(model.state_dict(), self.ckpt_file)
-        self.val_loss_min = val_loss
+        self.info_best = info
 
     def load_best(self, model):
+        # Load best model, clean-up checkpoint file and return additional info for best model
+        if self.verbose:
+            print(f'Loading best model with validation loss {self.val_loss_min:.6f}.')
         model.load_state_dict(torch.load(self.ckpt_file))
         os.remove(self.ckpt_file)
+        return self.info_best

@@ -8,10 +8,6 @@ ACTIVATIONS = {'relu': nn.ReLU(), 'swish': Swish(), 'tanh': nn.Tanh()}
 TORCH_DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
 
-def numpy_from_device(tensor):
-    return tensor.cpu().detach().numpy()
-
-
 class BootstrapEnsemble:
     def __init__(self, ensemble_size, in_features, out_features, hid_features, activation,
                  lr, weight_decay):
@@ -78,11 +74,8 @@ class BootstrapEnsemble:
         loss.backward()
         self.optim.step()
 
-        # Compute model-wise mean squared error and cross-entropy for diagnostics
-        mses = numpy_from_device(mse.mean((-2, -1)))
-        xentropies = numpy_from_device(xentropy.mean((-2, -1)))
-
-        return mses, xentropies
+        # Return per model mean squared error and cross-entropy
+        return mse.mean((-2, -1)).cpu().detach(), xentropy.mean((-2, -1)).cpu().detach()
 
     def evaluate(self, input, targ):
         mean, logvar = self.predict(input)
@@ -91,7 +84,4 @@ class BootstrapEnsemble:
         mse = (mean - targ) ** 2
         xentropy = mse * inv_var + logvar
 
-        mses = numpy_from_device(mse.mean((-2, -1)))
-        xentropies = numpy_from_device(xentropy.mean((-2, -1)))
-
-        return mses, xentropies
+        return mse.mean((-2, -1)).cpu().detach(), xentropy.mean((-2, -1)).cpu().detach()

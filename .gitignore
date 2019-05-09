@@ -64,3 +64,4 @@ runs/
 .ipynb_checkpoints/
 *.lprof
 .DS_Store
+*.ckpt

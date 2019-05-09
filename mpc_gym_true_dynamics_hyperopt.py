@@ -7,7 +7,7 @@ import pickle
 import gym
 
 
-ENV = 'MySwimmer-v2'
+ENV = 'MyHalfCheetah-v2'
 
 
 class ActionRepeat(object):
@@ -109,12 +109,12 @@ def run_trials(space, objective, init, step, filename):
 
 
 if __name__ == '__main__':
-    # 'MySwimmer-v2' {'horizon': 16, 'repeat': 9, 'topk': 20} -> 250
-    # 'MyHalfCheetah-v2' {'horizon': 12, 'repeat': 4, 'topk': 100} -> 10000
+    # 'MySwimmer-v2' {'horizon': 16, 'repeat': 9, 'topk': 20} -> 220
+    # 'MyHalfCheetah-v2' {'horizon': 12, 'repeat': 4, 'topk': 60} -> 15000
 
-    space = {'repeat': hp.quniform('repeat', 2, 20, 1),
-             'horizon': hp.quniform('horizon', 8, 16, 1),
-             'topk': hp.quniform('topk', 50, 100, 50)}
+    space = {'repeat': hp.quniform('repeat', 4, 4, 1),
+             'horizon': hp.quniform('horizon', 12, 12, 1),
+             'topk': hp.quniform('topk', 10, 90, 10)}
 
     while True:
         run_trials(space, objective, 2, 2, ENV)

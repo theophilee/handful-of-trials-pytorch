@@ -30,19 +30,20 @@ class Config:
 
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,
+                          "num_init_rollouts": 10,
                           "num_rollouts": 300,
                           "num_imagined_rollouts": 2})
 
         model_cfg = DotMap({"ensemble_size": 1,
                             "in_features": 26,
                             "out_features": 20,
-                            "hid_features": [200, 200],
+                            "hid_features": [200, 200, 200, 200],
                             "activation": "relu",
                             "lr": 1e-3,
                             "weight_decay": 1e-4})
 
-        opt_cfg = DotMap({"iterations": 5,
-                          "popsize": 500,
+        opt_cfg = DotMap({"iterations": 10,
+                          "popsize": 1000,
                           "num_elites": 50})
 
         mpc_cfg = DotMap({"env": self.env,
@@ -57,15 +58,16 @@ class Config:
                           "opt_cfg": opt_cfg})
 
         policy_cfg = DotMap({"env": self.env,
+                             "obs_features": 19,
                              "hid_features": [400, 300],
                              "activation": "relu",
                              "batch_size": 250,
                              "lr": 1e-3,
-                             "weight_decay": 0.})
+                             "weight_decay": 0.,
+                             "obs_preproc": self.obs_preproc})
 
         cfg = DotMap({"exp_cfg": exp_cfg,
                       "mpc_cfg": mpc_cfg,
                       "policy_cfg": policy_cfg})
 
         return cfg
-

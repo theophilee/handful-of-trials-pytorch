@@ -39,8 +39,8 @@ class CEMOptimizer:
 
         for _ in range(self.iterations):
             plans = Normal(mean, std).sample((self.popsize,)).transpose(0, 1)
-            costs = cost_function(plans, start_obs)
+            costs = cost_function(plans.clamp(-self.act_bound, self.act_bound), start_obs)
             elites = torch.stack([p[torch.argsort(c)][:self.num_elites] for p, c in zip(plans, costs)])
             mean, std = torch.mean(elites, dim=1), torch.std(elites, dim=1)
 
-        return mean
+        return mean.clamp(-self.act_bound, self.act_bound)

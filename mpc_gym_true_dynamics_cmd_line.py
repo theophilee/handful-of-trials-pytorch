@@ -90,11 +90,11 @@ def main(args):
     print('Mean score:         ', scores.mean())
     print('Standard deviation: ', scores.std())
 
-    path = os.path.join('expert_demonstrations', args.env)
+    path = os.path.join(args.savedir, args.env)
     if not os.path.exists(path):
         os.makedirs(path)
-    np.save(os.path.join(path, 'expert_obs'), observations)
-    np.save(os.path.join(path, 'expert_act'), actions)
+    np.save(os.path.join(path, 'obs'), observations)
+    np.save(os.path.join(path, 'act'), actions)
 
 
 if __name__ == '__main__':
@@ -113,7 +113,6 @@ if __name__ == '__main__':
                         help='Number of best action sequences to refit belief to.')
     parser.add_argument('-i', '--iterations', type=int, default=10,
                         help='Number of optimization iterations for each action sequence.')
-    parser.add_argument('--logdir', type=str, default='runs/mpc_gym_true_dynamics',
-                        help='Log directory for tensorboard.')
+    parser.add_argument('--savedir', type=str, default='save/mpc_gym_true_dynamics_cmd_line')
     args = parser.parse_args()
     main(args)

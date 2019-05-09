@@ -1,4 +1,3 @@
-from collections import OrderedDict
 from torch.utils.data import TensorDataset, DataLoader
 
 #from torch.multiprocessing import Pool, set_start_method
@@ -13,11 +12,10 @@ from optimizer import CEMOptimizer
 
 
 class MPC:
-    def __init__(self, param_str, args):
+    def __init__(self, args):
         """Model predictive controller.
 
         Arguments:
-            param_str (str): String descriptor of experiment hyper-parameters.
             args (DotMap): A DotMap of MPC parameters.
                 .env (gym.env): Environment for which this controller will be used.
                 .plan_hor (int): The planning horizon that will be used in optimization.
@@ -36,12 +34,12 @@ class MPC:
 
                 .model_cfg (DotMap): A DotMap of model parameters.
                     .ensemble_size (int): Number of bootstrap model.
-                    .in_features (int): size of each input sample
-                    .out_features (int): size of each output sample
-                    .hid_features iterable(int): size of each hidden layer, can be empty
-                    .activation: activation function, one of 'relu', 'swish'
-                    .lr (float): learning rate for optimizer
-                    .weight_decay (float): weight decay for model parameters
+                    .in_features (int): Size of each input sample.
+                    .out_features (int): Size of each output sample.
+                    .hid_features iterable(int): Size of each hidden layer, can be empty.
+                    .activation: Activation function, one of 'relu', 'swish'.
+                    .lr (float): Learning rate for optimizer.
+                    .weight_decay (float): Weight decay for model parameters.
 
                 .opt_cfg DotMap): A DotMap of optimizer parameters.
                     .iterations (int): The number of iterations to perform during
@@ -56,7 +54,6 @@ class MPC:
         self.obs_features = args.env.observation_space.shape[0]
         self.act_bound = args.env.action_space.high[0]
 
-        self.ckpt_file = param_str + '_ckpt.pt'
         self.plan_hor = args.plan_hor
         self.num_part = args.num_part
         self.batch_size = args.batch_size
@@ -68,7 +65,6 @@ class MPC:
         self.get_cost = args.get_cost
 
         self.has_been_trained = False
-
         # Check arguments
         assert self.num_part % self.num_nets == 0
 
@@ -86,69 +82,69 @@ class MPC:
         self.has_been_trained = True
 
         # Preprocess new data
-        X_new = torch.from_numpy(np.concatenate([self.obs_preproc(obs[:-1]), acts], axis=1)).float()
-        Y_new = torch.from_numpy(self.targ_proc(obs[:-1], obs[1:])).float()
+        assert (obs.ndim in [2, 3]) and obs.ndim == acts.ndim
+        if obs.ndim == 2:
+            X_new = np.concatenate([self.obs_preproc(obs[:-1]), acts], axis=1)
+            Y_new = self.targ_proc(obs[:-1], obs[1:])
+        elif obs.ndim == 3:
+            X_new = np.concatenate([np.concatenate([self.obs_preproc(o[:-1]), a], axis=1)
+                                    for o, a in zip(obs, acts)], axis=0)
+            Y_new = np.concatenate([self.targ_proc(o[:-1], o[1:]) for o in obs], axis=0)
+        X_new, Y_new = torch.from_numpy(X_new).float(), torch.from_numpy(Y_new).float()
 
         if iterative:
             # Add new data to training set
-            self.X = torch.cat((self.X, X_new))
-            self.Y = torch.cat((self.Y, Y_new))
+            self.X, self.Y = torch.cat((self.X, X_new)), torch.cat((self.Y, Y_new))
         else:
-            self.X = X_new
-            self.Y = Y_new
+            self.X, self.Y = X_new, Y_new
 
         # Store input statistics for normalization
         num_train = int(self.X.size(0) * train_split)
         self.model.fit_input_stats(self.X[:num_train])
 
+        metrics = {}
         if iterative:
-            # Compute per model mse and cross-entropy on new test data
-            metrics = OrderedDict()
-            metrics["model/mse/test"], metrics["model/xentropy/test"] = self.model.evaluate(
-                X_new.to(TORCH_DEVICE), Y_new.to(TORCH_DEVICE))
+            # Record mse and cross-entropy on new test data averaged across models
+            mse, xentropy = self.model.evaluate(self.X.to(TORCH_DEVICE), self.Y.to(TORCH_DEVICE))
+            metrics["model/mse/test"], metrics["model/xentropy/test"] = mse.mean(), xentropy.mean()
 
         train_dataset = TensorDataset(self.X[:num_train], self.Y[:num_train])
-        train_loader = DataLoader(train_dataset, batch_size=self.num_nets * self.batch_size, shuffle=True)
+        train_loaders = [DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
+                         for _ in range(self.num_nets)]
         test_dataset = TensorDataset(self.X[num_train:], self.Y[num_train:])
-        test_loader = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=True)
+        test_loaders = [DataLoader(test_dataset, batch_size=self.batch_size, shuffle=True)
+                       for _ in range(self.num_nets)]
+        train_batches, test_batches = len(train_loaders[0]), len(test_loaders[0])
 
-        train_mses, train_xentropies = [], []
-        val_mses, val_xentropies = [], []
-        early_stopping = EarlyStopping(ckpt_file=self.ckpt_file,
-                                       patience=min(20, 10 * self.num_nets))
+        early_stopping = EarlyStopping(patience=min(20, 10 * self.num_nets))
 
         # Training loop
         while not early_stopping.early_stop:
-            train_mse = np.zeros((len(train_loader), self.num_nets))
-            train_xentropy = np.zeros((len(train_loader), self.num_nets))
-            val_mse = np.zeros((len(test_loader), self.num_nets))
-            val_xentropy = np.zeros((len(test_loader), self.num_nets))
+            train_mse = torch.zeros((train_batches, self.num_nets))
+            train_xentropy = np.zeros((train_batches, self.num_nets))
+            val_mse = torch.zeros((test_batches, self.num_nets))
+            val_xentropy = torch.zeros((test_batches, self.num_nets))
 
-            for i, (X, Y) in enumerate(train_loader):
-                X = X.view(self.num_nets, X.size(0) // self.num_nets, -1).to(TORCH_DEVICE)
-                Y = Y.view(self.num_nets, Y.size(0) // self.num_nets, -1).to(TORCH_DEVICE)
+            for i, batch in enumerate(zip(*train_loaders)):
+                X, Y = [torch.stack(b).to(TORCH_DEVICE) for b in zip(*batch)]
                 train_mse[i], train_xentropy[i] = self.model.update(X, Y)
 
-            for i, (X, Y) in enumerate(test_loader):
-                val_mse[i], val_xentropy[i] = self.model.evaluate(X.to(TORCH_DEVICE), Y.to(TORCH_DEVICE))
+            for i, batch in enumerate(zip(*test_loaders)):
+                X, Y = [torch.stack(b).to(TORCH_DEVICE) for b in zip(*batch)]
+                val_mse[i], val_xentropy[i] = self.model.evaluate(X, Y)
 
-            train_mses.append(np.mean(train_mse, axis=0))
-            train_xentropies.append(np.mean(train_xentropy, axis=0))
-            val_mses.append(np.mean(val_mse, axis=0))
-            val_xentropies.append(np.mean(val_xentropy, axis=0))
+            # Record epoch train/val mse and cross-entropy averaged across models
+            info = {"model/mse/train": train_mse.mean(),
+                    "model/xentropy/train": train_xentropy.mean(),
+                    "model/mse/val": val_mse.mean(),
+                    "model/xentropy/val": val_xentropy.mean()}
 
             # Stop if mean validation mse across all models stops decreasing
-            early_stopping(np.mean(val_mse), self.model.net)
+            early_stopping.step(val_mse.mean(), self.model.net, info)
 
         # Load policy with best validation loss
-        early_stopping.load_best(self.model.net)
-
-        # Record train/val per model mse and cross-entropy for each epoch
-        metrics["model/mse/train"] = train_mses
-        metrics["model/xentropy/train"] = train_xentropies
-        metrics["model/mse/val"] = val_mses
-        metrics["model/xentropy/val"] = val_xentropies
-
+        info_best = early_stopping.load_best(self.model.net)
+        metrics.update(info_best)
         return metrics
 
     def act(self, obs):

@@ -10,7 +10,6 @@ class Config:
     def __init__(self):
         env = gym.make("MyHalfCheetah-v2")
         self.env = ActionRepeat(env, 4)
-        # TODO remove pre-processing?
 
     def obs_preproc(self, obs):
         if isinstance(obs, np.ndarray):
@@ -39,6 +38,7 @@ class Config:
 
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,
+                          "num_init_rollouts": 10,
                           "num_rollouts": 300,
                           "num_imagined_rollouts": 2})
 
@@ -46,16 +46,16 @@ class Config:
                             "in_features": 24,
                             "out_features": 18,
                             "hid_features": [200, 200, 200, 200],
-                            "activation": "swish",
+                            "activation": "relu",
                             "lr": 1e-3,
                             "weight_decay": 1e-4})
 
-        opt_cfg = DotMap({"iterations": 5,
-                          "popsize": 500,
-                          "num_elites": 50})
+        opt_cfg = DotMap({"iterations": 10,
+                          "popsize": 1000,
+                          "num_elites": 60})
 
         mpc_cfg = DotMap({"env": self.env,
-                          "plan_hor": 30,
+                          "plan_hor": 12,
                           "num_part": 20,
                           "batch_size": 32,
                           "obs_preproc": self.obs_preproc,
@@ -66,11 +66,13 @@ class Config:
                           "opt_cfg": opt_cfg})
 
         policy_cfg = DotMap({"env": self.env,
+                             "obs_features": 18,
                              "hid_features": [400, 300],
                              "activation": "relu",
                              "batch_size": 250,
                              "lr": 1e-3,
-                             "weight_decay": 0.})
+                             "weight_decay": 0.,
+                             "obs_preproc":self.obs_preproc})
 
         cfg = DotMap({"exp_cfg": exp_cfg,
                       "mpc_cfg": mpc_cfg,

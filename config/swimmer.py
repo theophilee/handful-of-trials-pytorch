@@ -3,10 +3,13 @@ import numpy as np
 import torch
 from dotmap import DotMap
 
+from .action_repeat import ActionRepeat
+
 
 class Config:
     def __init__(self):
-        self.env = gym.make("MySwimmer-v2")
+        env = gym.make("MySwimmer-v2")
+        self.env = ActionRepeat(env, 9)
 
     def obs_preproc(self, obs):
         return obs[:, 1:]
@@ -30,23 +33,24 @@ class Config:
 
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,
+                          "num_init_rollouts": 10,
                           "num_rollouts": 300,
                           "num_imagined_rollouts": 2})
 
         model_cfg = DotMap({"ensemble_size": 1,
                             "in_features": 10,
                             "out_features": 9,
-                            "hid_features": [200, 200],
+                            "hid_features": [200, 200, 200, 200],
                             "activation": "relu",
                             "lr": 1e-3,
                             "weight_decay": 1e-4})
 
-        opt_cfg = DotMap({"iterations": 5,
-                          "popsize": 500,
-                          "num_elites": 50})
+        opt_cfg = DotMap({"iterations": 10,
+                          "popsize": 1000,
+                          "num_elites": 20})
 
         mpc_cfg = DotMap({"env": self.env,
-                          "plan_hor": 30,
+                          "plan_hor": 16,
                           "num_part": 20,
                           "batch_size": 32,
                           "obs_preproc": self.obs_preproc,
@@ -57,15 +61,16 @@ class Config:
                           "opt_cfg": opt_cfg})
 
         policy_cfg = DotMap({"env": self.env,
-                             "hid_features": [400, 300],
+                             "obs_features": 8,
+                             "hid_features": [200, 200],
                              "activation": "relu",
                              "batch_size": 250,
                              "lr": 1e-3,
-                             "weight_decay": 0.})
+                             "weight_decay": 0.,
+                             "obs_preproc": self.obs_preproc})
 
         cfg = DotMap({"exp_cfg": exp_cfg,
                       "mpc_cfg": mpc_cfg,
                       "policy_cfg": policy_cfg})
 
         return cfg
-

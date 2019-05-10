@@ -2,6 +2,7 @@ class ActionRepeat(object):
     def __init__(self, env, amount):
         self._env = env
         self._amount = amount
+        self._env._task_hor = self._env._max_episode_steps
         self._env._max_episode_steps = self._env._max_episode_steps // amount
 
     def __getattr__(self, name):

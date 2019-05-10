@@ -1,4 +1,6 @@
 from torch.utils.data import TensorDataset, DataLoader
+from functools import partial
+import time
 
 #from torch.multiprocessing import Pool, set_start_method
 #try:
@@ -76,10 +78,27 @@ class MPC:
         self.Y = torch.empty((0, args.model_cfg.out_features))
 
         # Bootstrap ensemble model
-        self.model = BootstrapEnsemble(**args.model_cfg)
+        self.reset_model = partial(self._reset_model, model_cfg=args.model_cfg)
+        self.model = self.reset_model()
 
-    def train(self, obs, acts, train_split=0.9, iterative=True):
+    def _reset_model(self, model_cfg):
+        return BootstrapEnsemble(**model_cfg)
+
+    def train(self, obs, acts, train_split=0.9, iterative=True, reset_model=False):
+        """ Train bootstrap ensemble model.
+
+        Arguments:
+            obs (2D or 3D np.ndarray): observations
+            acts (2D or 3D np.ndarray): actions
+            train_split (float): proportion of data used for training
+            iterative (bool): if True, add new data to training set otherwise
+                start training set from scratch
+            reset_model (bool): if True, reset model weights and optimizer
+        """
         self.has_been_trained = True
+
+        if reset_model:
+            self.model = self.reset_model()
 
         # Preprocess new data
         assert (obs.ndim in [2, 3]) and obs.ndim == acts.ndim
@@ -116,7 +135,8 @@ class MPC:
                        for _ in range(self.num_nets)]
         train_batches, test_batches = len(train_loaders[0]), len(test_loaders[0])
 
-        early_stopping = EarlyStopping(patience=min(20, 10 * self.num_nets))
+        early_stopping = EarlyStopping(patience=10)
+        start = time.time()
 
         # Training loop
         while not early_stopping.early_stop:
@@ -134,18 +154,22 @@ class MPC:
                 val_mse[i], val_xentropy[i] = self.model.evaluate(X, Y)
 
             # Record epoch train/val mse and cross-entropy averaged across models
-            info = {"model/mse/train": train_mse.mean(),
-                    "model/xentropy/train": train_xentropy.mean(),
-                    "model/mse/val": val_mse.mean(),
-                    "model/xentropy/val": val_xentropy.mean()}
+            info_step = {"metrics": {"model/mse/train": train_mse.mean(),
+                                     "model/xentropy/train": train_xentropy.mean(),
+                                     "model/mse/val": val_mse.mean(),
+                                     "model/xentropy/val": val_xentropy.mean()},
+                         "tensors": {"model/max_logvar": self.model.net[-1].max_logvar,
+                                     "model/min_logvar": self.model.net[-1].min_logvar}}
 
             # Stop if mean validation mse across all models stops decreasing
-            early_stopping.step(val_mse.mean(), self.model.net, info)
+            early_stopping.step(val_mse.mean(), self.model.net, info_step)
 
         # Load policy with best validation loss
         info_best = early_stopping.load_best(self.model.net)
-        metrics.update(info_best)
-        return metrics
+        metrics.update(info_best["metrics"])
+        metrics["model/train_time"] = time.time() - start
+
+        return metrics, info_best["tensors"]
 
     def act(self, obs):
         """Returns the action that this controller would take for a single observation obs.
@@ -237,19 +261,14 @@ class MPC:
         # Preprocess observations
         proc_obs = self.obs_preproc(obs)
 
-        # Duplicate observations and actions to be processed by ensemble
+        # Predict next observations by averaging ensemble predictions
         proc_obs = proc_obs.repeat(self.num_nets, 1, 1)
         acts = acts.repeat(self.num_nets, 1, 1)
-
-        # Predict next observations
-        mean, logvar = self.model.predict(torch.cat((proc_obs, acts), dim=-1))
-        preds = mean + torch.randn_like(mean, device=TORCH_DEVICE) * logvar.exp().sqrt()
-
-        # Average ensemble predictions
-        avg_pred = preds.mean(dim=0)
+        preds = self.model.sample(torch.cat((proc_obs, acts), dim=-1))
+        avg_preds = preds.mean(dim=0)
 
         # Postprocess predictions
-        return self.pred_postproc(obs, avg_pred)
+        return self.pred_postproc(obs, avg_preds)
 
     def _predict_next_obs_divide(self, obs, acts):
         """Predict next observation by dividing predictions among models in ensemble.
@@ -262,16 +281,12 @@ class MPC:
         # Preprocess observations
         proc_obs = self.obs_preproc(obs)
 
-        # Divide particles among models in ensemble
-        proc_obs = self._to_bootstrap_shape(proc_obs)
-        acts = self._to_bootstrap_shape(acts)
-
-        # Predict next observations
-        mean, logvar = self.model.predict(torch.cat((proc_obs, acts), dim=-1))
-        preds = mean + torch.randn_like(mean, device=TORCH_DEVICE) * logvar.exp().sqrt()
+        # Predict next observations, by dividing particles among models in ensemble
+        input = self._to_bootstrap_shape(torch.cat((proc_obs, acts), dim=-1))
+        preds = self.model.sample(input)
+        preds = self._from_bootstrap_shape(preds)
 
         # Postprocess predictions
-        preds = self._from_bootstrap_shape(preds)
         return self.pred_postproc(obs, preds)
 
     def _to_bootstrap_shape(self, input):

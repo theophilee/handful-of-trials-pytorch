@@ -55,6 +55,11 @@ class BootstrapEnsemble:
         input = (input - self.input_mean) / self.input_std
         return self.net(input)
 
+    def sample(self, input):
+        mean, logvar = self.predict(input)
+        sample = mean + torch.randn_like(mean, device=TORCH_DEVICE) * logvar.exp().sqrt()
+        return sample
+
     def update(self, input, targ):
         # Compute model predictions
         mean, logvar = self.predict(input)

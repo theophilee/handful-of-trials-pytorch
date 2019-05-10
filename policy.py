@@ -87,7 +87,7 @@ class Policy:
         test_dataset = TensorDataset(self.X[num_train:], self.Y[num_train:])
         test_loader = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=True)
 
-        early_stopping = EarlyStopping(patience=20)
+        early_stopping = EarlyStopping(patience=10)
 
         # Training loop
         while not early_stopping.early_stop:

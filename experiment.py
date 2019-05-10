@@ -27,18 +27,23 @@ class Experiment:
             logdir: Log directory for Tensorboard.
             savedir: Save directory.
             args (DotMap): A DotMap of experiment parameters.
-                .env: (OpenAI gym environment) The environment for this agent.
+                .env (OpenAI gym environment): The environment for this agent.
+                .expert_demos (bool): If True, add expert demonstrations to
+                    initial dynamics model training set.
                 .num_init_rollouts (int): Number of initial random rollouts.
                 .num_rollouts (int): Number of rollouts for which we train.
+                .train_freq (int): Number of episodes to wait for before
+                    retraining model.
                 .num_imagined_rollouts (int): Number of imagined rollouts per
                     iteration of inner imitation learning loop.
         """
         self.mpc = mpc
         self.policy = policy
         self.env = args.env
-        self.task_hor = self.env._max_episode_steps
+        self.expert_demos = args.expert_demos
         self.num_init_rollouts = args.num_init_rollouts
         self.num_rollouts = args.num_rollouts
+        self.train_freq = args.train_freq
         self.num_imagined_rollouts = args.num_imagined_rollouts
 
         self.env_str = env_str
@@ -53,38 +58,47 @@ class Experiment:
         """Model predictive control baseline, no parameterized policy.
         """
         # Initial random rollouts
-        obs, acts = [], []
-        for i in range(self.num_init_rollouts):
-            o, a, _ = self.sample_rollout(actor='mpc')
-            obs.append(o)
-            acts.append(a)
-        self.mpc.train(np.array(obs), np.array(acts))
+        obs, acts, _ = self._sample_rollouts(self.num_init_rollouts, actor='mpc')
+
+        # Optionally add expert demonstrations
+        if self.expert_demos:
+            obs_expert, acts_expert = self._load_expert_demos()
+            obs = np.concatenate((obs, obs_expert), axis=0)
+            acts = np.concatenate((acts, acts_expert), axis=0)
+
+        # Train initial model
+        self.mpc.train(obs, acts, iterative=True)
 
         # Training loop
-        for i in range(self.num_rollouts):
-            print("\nStarting training iteration %d." % (i + 1))
+        step = self.num_init_rollouts
+        while step < self.num_rollouts:
+            step += self.train_freq
 
-            # Sample rollout using mpc
-            obs, acts, reward_sum = self.sample_rollout(actor='mpc')
-            print_rollout_stats(obs, acts, reward_sum)
+            # Sample rollouts
+            start = time.time()
+            print(f"Rolling out {self.train_freq} trajectories...")
+            obs, acts, avg_return = self._sample_rollouts(self.train_freq, actor='mpc')
+            self.logger.log_scalar("rollout/avg_reward", avg_return, step)
+            self.logger.log_scalar("rollout/avg_time", (time.time() - start) / self.train_freq, step)
 
             # Train model
-            metrics = self.mpc.train(obs, acts, iterative=True)
+            metrics, tensors = self.mpc.train(obs, acts, iterative=True)
+            for k, v in metrics.items():
+                self.logger.log_scalar(k, v, step)
+            for k, v in tensors.items():
+                self.logger.log_histogram(k, v, step)
 
-            # Log to Tensorboard
-            step = (i + 1) * self.task_hor
-            self.logger.log_scalar("reward/mpc", reward_sum, step)
-            self.logger.log_scalar("model/mse/test", metrics["model/mse/test"].mean(), step)
-            self.logger.log_scalar("model/mse/train", metrics["model/mse/train"].mean(), step)
-            self.logger.log_scalar("model/mse/val", metrics["model/mse/val"].mean(), step)
+    def _load_expert_demos(self):
+        path = os.path.join('save/mpc_gym_true_dynamics_cmd_line', self.env_str)
+        obs = np.load(os.path.join(path, 'obs.npy'))
+        acts = np.load(os.path.join(path, 'act.npy'))
+        return obs, acts
 
     def run_behavior_cloning_debug(self):
         """Train parameterized policy with behaviour cloning on saved expert demonstrations.
         """
         # Load expert demonstrations
-        path = os.path.join('save/mpc_gym_true_dynamics_cmd_line', self.env_str)
-        obs = np.load(os.path.join(path, 'obs.npy'))
-        acts = np.load(os.path.join(path, 'act.npy'))
+        obs, acts = self._load_expert_demos()
         #obs = np.load(f'save/TD3/{self.env_str}_obs.npy')
         #acts = np.load(f'save/TD3/{self.env_str}_act.npy')
         obs = obs[:, :-1].reshape(-1, self.env.observation_space.shape[0])
@@ -94,38 +108,18 @@ class Experiment:
         self.policy.train(obs, acts, iterative=False)
 
         # Sample rollout from parameterized policy for evaluation
-        obs_policy, acts_policy, reward_sum_policy = self.sample_rollout(actor='policy')
+        obs_policy, acts_policy, reward_sum_policy = self._sample_rollout(actor='policy')
         print_rollout_stats(obs_policy, acts_policy, reward_sum_policy)
-
-    def run_dagger_debug(self):
-        """Train parameterized policy with DAgger.
-        """
-        # TODO implement action labeling with mpc_true_dynamics?
-        pass
 
     def run_train_model_debug(self):
         """Train dynamics model on saved expert demonstrations.
         """
-        # Load expert demonstrations
-        path = os.path.join('save/mpc_gym_true_dynamics_cmd_line', self.env_str)
-        obs = np.load(os.path.join(path, 'obs.npy'))
-        acts = np.load(os.path.join(path, 'act.npy'))
+        #obs, acts = self._load_expert_demos()
+        obs, acts, _ = self._sample_rollouts(self.num_init_rollouts, actor='mpc')
 
-        # Train model iteratively (same setting as real experiment)
-        """
-        for i, (o, a) in enumerate(zip(obs, acts)):
-            print("\nStarting training iteration %d." % (i + 1))
-
-            metrics = self.mpc.train(o, a, iterative=True)
-            print('Test', metrics["model/mse/test"].mean().item())
-            print('Train', metrics["model/mse/train"].mean().item())
-            print('Val', metrics["model/mse/val"].mean().item())
-        """
-        metrics = self.mpc.train(obs, acts, iterative=False)
-        print('Test', metrics["model/mse/test"].mean().item())
-        print('Train', metrics["model/mse/train"].mean().item())
-        print('Val', metrics["model/mse/val"].mean().item())
-
+        metrics, _ = self.mpc.train(obs, acts, iterative=False)
+        for k, v in metrics.items():
+            print(f'{k}: {v}')
 
     def run_experiment(self, algo):
         """Learn parameterized policy by behavior cloning on trajectories generated by
@@ -135,22 +129,10 @@ class Experiment:
             algo (str): one of 'behavior_cloning', 'dagger'
         """
         assert algo in ['behavior_cloning', 'dagger']
+        raise NotImplementedError
+        # TODO implement this function
 
-        # Initial random rollout
-        obs, acts, reward_sum = self.sample_rollout(actor='mpc')
-        self.mpc.train(obs, acts)
-
-        # Training loop
-        for i in range(self.num_rollouts):
-            print("\nStarting training iteration %d." % (i + 1))
-
-            # Reset policy training dataset
-            self.policy.reset_training_set()
-
-            # TODO implement this function
-            raise NotImplementedError
-
-    def sample_rollout(self, actor):
+    def _sample_rollout(self, actor):
         """Sample a rollout generated by a given actor in the environment.
 
         Argument:
@@ -164,19 +146,25 @@ class Experiment:
         assert actor in ['mpc', 'policy']
         observations, actions, reward_sum, times = [self.env.reset()], [], 0, []
 
-        for t in range(self.task_hor):
+        for t in range(self.env._max_episode_steps):
             start = time.time()
-
             if actor == 'mpc':
                 actions.append(self.mpc.act(observations[t]))
             elif actor == 'policy':
                 actions.append(self.policy.act(observations[t]))
-
             times.append(time.time() - start)
             obs, reward, _, _ = self.env.step(actions[t])
             observations.append(obs)
             reward_sum += reward
 
         #print("Average action selection time: ", np.mean(times))
-
         return np.array(observations), np.array(actions), reward_sum
+
+    def _sample_rollouts(self, num, actor):
+       observations, actions, returns = [], [], []
+
+       for _ in range(num):
+           obs, acts, ret = self._sample_rollout(actor)
+           observations.append(obs); actions.append(acts), returns.append(ret)
+
+       return np.array(observations), np.array(actions), np.array(returns).mean()

@@ -22,7 +22,9 @@ def main(args):
 
     # Overwrite configuration with command line arguments
     cfg.mpc_cfg.model_cfg.ensemble_size = args.ensemble_size
-    param_str = '%d' % args.ensemble_size
+    cfg.mpc_cfg.model_cfg.activation = args.activation
+    cfg.exp_cfg.expert_demos = args.expert_demos
+    param_str = f'{args.ensemble_size}_{args.activation}_{args.expert_demos}'
 
     # Model predictive control policy
     mpc = MPC(cfg.mpc_cfg)
@@ -48,6 +50,10 @@ if __name__ == "__main__":
                         help='Random seed.')
     parser.add_argument('--ensemble-size', type=int, default=5,
                         help='Number of bootstrap ensemble dynamics models.')
+    parser.add_argument('--activation', type=str, default='relu',
+                        help='Activation function for dynamics model.')
+    parser.add_argument('--expert-demos', default=False, type=lambda x: (str(x).lower() == 'true'),
+                        help='If True, add expert demonstrations to dynamics model training set.')
     args = parser.parse_args()
 
     main(args)

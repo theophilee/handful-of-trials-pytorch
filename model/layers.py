@@ -21,18 +21,16 @@ class BootstrapLinear(nn.Module):
                 (ensemble_size, in_features, out_features) initialized
                 as truncated normal
             bias: the learnable bias of the module of shape
-                (ensemble_size, out_features) initialized as zero
+                (ensemble_size, 1, out_features) initialized as zero
         """
         super().__init__()
         self.weight = nn.Parameter(torch.Tensor(ensemble_size, in_features, out_features))
-        self.bias = nn.Parameter(torch.Tensor(out_features))
+        self.bias = nn.Parameter(torch.Tensor(ensemble_size, 1, out_features))
         self.reset_parameters()
 
     def reset_parameters(self):
         nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
-        fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
-        bound = 1 / math.sqrt(fan_in)
-        nn.init.uniform_(self.bias, -bound, bound)
+        nn.init.zeros_(self.bias)
 
     def forward(self, input):
         return input.matmul(self.weight) + self.bias

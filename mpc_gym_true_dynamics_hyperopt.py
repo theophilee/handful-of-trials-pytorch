@@ -110,7 +110,7 @@ def run_trials(space, objective, init, step, filename):
 
 if __name__ == '__main__':
     # 'MySwimmer-v2' {'horizon': 16, 'repeat': 9, 'topk': 20} -> 220
-    # 'MyHalfCheetah-v2' {'horizon': 12, 'repeat': 4, 'topk': 60} -> 15000
+    # 'MyHalfCheetah-v2' {'horizon': 12, 'repeat': 4, 'topk': 60} -> 12594 (std = 886)
 
     space = {'repeat': hp.quniform('repeat', 4, 4, 1),
              'horizon': hp.quniform('horizon', 12, 12, 1),

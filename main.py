@@ -9,7 +9,7 @@ from config import get_config
 from utils import *
 
 
-ALLOWED_ENVS = ["cartpole", "half_cheetah", "hopper", "swimmer"]
+ALLOWED_ENVS = ["cartpole", "half_cheetah", "swimmer"]
 
 
 def main(args):

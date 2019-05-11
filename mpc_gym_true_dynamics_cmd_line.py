@@ -15,16 +15,25 @@ import gym
 class ActionRepeat(object):
     def __init__(self, env, amount):
         self._env = env
-        self._amount = amount
-        self._env._max_episode_steps = self._env._max_episode_steps // amount
+        self.amount = amount
+        self.num_steps = self._env._max_episode_steps // amount
 
-    def __getattr__(self, name):
-        return getattr(self._env, name)
+    @ property
+    def observation_space(self):
+        return self._env.observation_space
+
+    @property
+    def action_space(self):
+        return self._env.action_space
+
+    @property
+    def sim(self):
+        return self._env.sim
 
     def step(self, action):
         total_reward = 0
 
-        for _ in range(self._amount):
+        for _ in range(self.amount):
             obs, reward, _, _ = self._env.step(action)
             total_reward += reward
 
@@ -72,13 +81,13 @@ def main(args):
     pool = Pool(32, initializer, [env])
 
     scores = np.zeros(args.episodes)
-    observations = np.zeros((args.episodes, env._max_episode_steps + 1) + env.observation_space.shape)
-    actions = np.zeros((args.episodes, env._max_episode_steps) + env.action_space.shape)
+    observations = np.zeros((args.episodes, env.num_steps + 1) + env.observation_space.shape)
+    actions = np.zeros((args.episodes, env.num_steps) + env.action_space.shape)
 
     for i in range(args.episodes):
         observations[i, 0] = env.reset()
 
-        for t in range(env._max_episode_steps):
+        for t in range(env.num_steps):
             state = env.sim.get_state()
             actions[i, t] = cem_planner(pool, env.action_space, state, args.horizon,
                                         args.proposals, args.topk, args.iterations)

@@ -18,9 +18,3 @@ register(
     entry_point='env.swimmer:SwimmerEnv',
     max_episode_steps=1000,
 )
-
-register(
-    id='MyHopper-v2',
-    entry_point='env.hopper:HopperEnv',
-    max_episode_steps=1000,
-)

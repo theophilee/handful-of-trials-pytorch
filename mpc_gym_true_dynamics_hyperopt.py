@@ -13,16 +13,25 @@ ENV = 'MyHalfCheetah-v2'
 class ActionRepeat(object):
     def __init__(self, env, amount):
         self._env = env
-        self._amount = amount
-        self._env._max_episode_steps = self._env._max_episode_steps // amount
+        self.amount = amount
+        self.num_steps = self._env._max_episode_steps // amount
 
-    def __getattr__(self, name):
-        return getattr(self._env, name)
+    @ property
+    def observation_space(self):
+        return self._env.observation_space
+
+    @property
+    def action_space(self):
+        return self._env.action_space
+
+    @property
+    def sim(self):
+        return self._env.sim
 
     def step(self, action):
         total_reward = 0
 
-        for _ in range(self._amount):
+        for _ in range(self.amount):
             obs, reward, _, _ = self._env.step(action)
             total_reward += reward
 
@@ -74,7 +83,7 @@ def objective(space):
 
     cost = 0
     env.reset()
-    for _ in range(env._max_episode_steps):
+    for _ in range(env.num_steps):
         state = env.sim.get_state()
         action = cem_planner(pool, env.action_space, state, int(space['horizon']),
                              proposals, int(space['topk']), iterations)

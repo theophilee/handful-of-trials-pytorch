@@ -9,18 +9,21 @@ from .action_repeat import ActionRepeat
 class Config:
     def __init__(self):
         env = gym.make("MyCartpole-v0")
-        self.env = ActionRepeat(env, 4)
+        action_repeat = 4
+        self.env = ActionRepeat(env, action_repeat)
+
+        self.obs_features = self.env.observation_space.shape[0]
+        self.obs_features_preprocessed = self.obs_features + 1
+        self.act_features = self.env.action_space.shape[0]
 
         self.device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
         self.ee_sub = torch.tensor([0.0, 0.6], device=self.device, dtype=torch.float)
 
     def obs_preproc(self, obs):
         if isinstance(obs, np.ndarray):
-            return np.concatenate(
-                [np.sin(obs[:, 1:2]),  np.cos(obs[:, 1:2]), obs[:, :1], obs[:, 2:]], axis=1)
+            return np.concatenate([obs[:, :1], np.sin(obs[:, 1:2]), np.cos(obs[:, 1:2]), obs[:, 2:]], axis=1)
         elif isinstance(obs, torch.Tensor):
-            return torch.cat(
-                [obs[:, 1:2].sin(), obs[:, 1:2].cos(), obs[:, :1], obs[:, 2:]], dim=1)
+            return torch.cat([obs[:, :1], obs[:, 1:2].sin(), obs[:, 1:2].cos(), obs[:, 2:]], dim=1)
 
     def pred_postproc(self, obs, pred):
         return obs + pred
@@ -50,8 +53,8 @@ class Config:
                           "num_imagined_rollouts": 2})
 
         model_cfg = DotMap({"ensemble_size": 1,
-                            "in_features": 6,
-                            "out_features": 4,
+                            "in_features": self.obs_features_preprocessed + self.act_features,
+                            "out_features": self.obs_features,
                             "hid_features": [200, 200, 200, 200],
                             "activation": "relu",
                             "lr": 1e-3,
@@ -73,7 +76,7 @@ class Config:
                           "opt_cfg": opt_cfg})
 
         policy_cfg = DotMap({"env": self.env,
-                             "obs_features": 5,
+                             "obs_features": self.obs_features_preprocessed,
                              "hid_features": [400, 300],
                              "activation": "relu",
                              "batch_size": 250,

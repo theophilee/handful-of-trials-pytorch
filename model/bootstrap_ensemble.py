@@ -45,7 +45,6 @@ class BootstrapEnsemble:
 
     def fit_input_stats(self, input):
         # Store data statistics for normalization
-        # TODO how important is input normalization?
         self.input_mean = torch.mean(input, dim=0, keepdim=True).to(TORCH_DEVICE)
         self.input_std = torch.std(input, dim=0, keepdim=True).to(TORCH_DEVICE)
         self.input_std.data[self.input_std.data < 1e-12] = 1.0
@@ -71,7 +70,6 @@ class BootstrapEnsemble:
         loss = xentropy.mean()
 
         # Special regularization for max and min log variance parameters
-        # TODO how important is special regularization for max and min log variance?
         loss += 0.01 * (self.net[-1].max_logvar.sum() - self.net[-1].min_logvar.sum())
 
         # Take a gradient step

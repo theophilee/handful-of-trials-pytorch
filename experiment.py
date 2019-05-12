@@ -88,12 +88,6 @@ class Experiment:
             for k, v in tensors.items():
                 self.logger.log_histogram(k, v, step)
 
-    def _load_expert_demos(self):
-        path = os.path.join('save/mpc_gym_true_dynamics_cmd_line', self.env_str)
-        obs = np.load(os.path.join(path, 'obs.npy'))
-        acts = np.load(os.path.join(path, 'act.npy'))
-        return obs, acts
-
     def run_behavior_cloning_debug(self):
         """Train parameterized policy with behaviour cloning on saved expert demonstrations.
         """
@@ -117,7 +111,7 @@ class Experiment:
         #obs, acts = self._load_expert_demos()
         obs, acts, _ = self._sample_rollouts(self.num_init_rollouts, actor='mpc')
 
-        metrics, _ = self.mpc.train(obs, acts, iterative=False)
+        metrics, _ = self.mpc.train(obs, acts, iterative=False, debug_logger=self.logger)
         for k, v in metrics.items():
             print(f'{k}: {v}')
 
@@ -131,6 +125,12 @@ class Experiment:
         assert algo in ['behavior_cloning', 'dagger']
         raise NotImplementedError
         # TODO implement this function
+
+    def _load_expert_demos(self):
+        path = os.path.join('save/mpc_gym_true_dynamics_cmd_line', self.env_str)
+        obs = np.load(os.path.join(path, 'obs.npy'))
+        acts = np.load(os.path.join(path, 'act.npy'))
+        return obs, acts
 
     def _sample_rollouts(self, num, actor):
        observations, actions, returns = [], [], []

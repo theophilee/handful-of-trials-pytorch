@@ -73,8 +73,7 @@ class Policy:
             self.X, self.Y = X_new, Y_new
 
         # Compute input statistics for normalization
-        num_train = int(self.X.size(0) * train_split)
-        self._fit_input_stats(self.X[:num_train])
+        self._fit_input_stats(self.X)
 
         metrics = {}
         if iterative:
@@ -82,17 +81,19 @@ class Policy:
             metrics["policy/mse/test"] = self.criterion(self.predict(X_new.to(TORCH_DEVICE)),
                                                         Y_new.to(TORCH_DEVICE)).item()
 
-        train_dataset = TensorDataset(self.X[:num_train], self.Y[:num_train])
+        dataset = TensorDataset(self.X, self.Y)
+        train_size = int(train_split * len(self.X))
+        val_size = len(self.X) - train_size
+        train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
-        test_dataset = TensorDataset(self.X[num_train:], self.Y[num_train:])
-        test_loader = DataLoader(test_dataset, batch_size=self.batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=self.batch_size, shuffle=True)
 
         early_stopping = EarlyStopping(patience=10)
 
         # Training loop
         while not early_stopping.early_stop:
             train_mse = torch.zeros(len(train_loader))
-            val_mse = torch.zeros(len(test_loader))
+            val_mse = torch.zeros(len(val_loader))
 
             for i, (X, Y) in enumerate(train_loader):
                 loss = self.criterion(self.predict(X.to(TORCH_DEVICE)), Y.to(TORCH_DEVICE))
@@ -103,7 +104,7 @@ class Policy:
                 loss.backward()
                 self.optim.step()
 
-            for i, (X, Y) in enumerate(test_loader):
+            for i, (X, Y) in enumerate(val_loader):
                 loss = self.criterion(self.predict(X.to(TORCH_DEVICE)), Y.to(TORCH_DEVICE))
                 val_mse[i] = loss.item()
 

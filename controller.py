@@ -84,7 +84,8 @@ class MPC:
     def _reset_model(self, model_cfg):
         return BootstrapEnsemble(**model_cfg)
 
-    def train(self, obs, acts, train_split=0.9, iterative=True, reset_model=False):
+    def train(self, obs, acts, train_split=0.9, iterative=True, reset_model=False,
+              debug_logger=None):
         """ Train bootstrap ensemble model.
 
         Arguments:
@@ -94,6 +95,7 @@ class MPC:
             iterative (bool): if True, add new data to training set otherwise
                 start training set from scratch
             reset_model (bool): if True, reset model weights and optimizer
+            debug_logger: if not None, plot metrics every epoch
         """
         self.has_been_trained = True
 
@@ -111,45 +113,48 @@ class MPC:
             Y_new = np.concatenate([self.targ_proc(o[:-1], o[1:]) for o in obs], axis=0)
         X_new, Y_new = torch.from_numpy(X_new).float(), torch.from_numpy(Y_new).float()
 
+        # Add new data to training set
         if iterative:
-            # Add new data to training set
             self.X, self.Y = torch.cat((self.X, X_new)), torch.cat((self.Y, Y_new))
         else:
             self.X, self.Y = X_new, Y_new
 
         # Store input statistics for normalization
-        num_train = int(self.X.size(0) * train_split)
-        self.model.fit_input_stats(self.X[:num_train])
+        self.model.fit_input_stats(self.X)
 
+        # Create bootstrap ensemble train-val splits
+        dataset = TensorDataset(self.X, self.Y)
+        train_size = int(train_split * len(self.X))
+        val_size = len(self.X) - train_size
+        train_loaders, val_loaders = [], []
+        for _ in range(self.num_nets):
+            train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
+            train_loaders.append(DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True))
+            val_loaders.append(DataLoader(val_dataset, batch_size=self.batch_size, shuffle=True))
+
+        # Record mse and cross-entropy on new test data
         metrics = {}
         if iterative:
-            # Record mse and cross-entropy on new test data averaged across models
-            mse, xentropy = self.model.evaluate(self.X.to(TORCH_DEVICE), self.Y.to(TORCH_DEVICE))
+            mse, xentropy = self.model.evaluate(X_new.to(TORCH_DEVICE), Y_new.to(TORCH_DEVICE))
             metrics["model/mse/test"], metrics["model/xentropy/test"] = mse.mean(), xentropy.mean()
 
-        train_dataset = TensorDataset(self.X[:num_train], self.Y[:num_train])
-        train_loaders = [DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
-                         for _ in range(self.num_nets)]
-        test_dataset = TensorDataset(self.X[num_train:], self.Y[num_train:])
-        test_loaders = [DataLoader(test_dataset, batch_size=self.batch_size, shuffle=True)
-                       for _ in range(self.num_nets)]
-        train_batches, test_batches = len(train_loaders[0]), len(test_loaders[0])
-
-        early_stopping = EarlyStopping(patience=10)
+        early_stopping = EarlyStopping(patience=12)
         start = time.time()
 
         # Training loop
+        epoch = 0
         while not early_stopping.early_stop:
-            train_mse = torch.zeros((train_batches, self.num_nets))
-            train_xentropy = np.zeros((train_batches, self.num_nets))
-            val_mse = torch.zeros((test_batches, self.num_nets))
-            val_xentropy = torch.zeros((test_batches, self.num_nets))
+            epoch += 1
+            train_mse = torch.zeros((len(train_loaders[0]), self.num_nets))
+            train_xentropy = np.zeros((len(train_loaders[0]), self.num_nets))
+            val_mse = torch.zeros((len(val_loaders[0]), self.num_nets))
+            val_xentropy = torch.zeros((len(val_loaders[0]), self.num_nets))
 
             for i, batch in enumerate(zip(*train_loaders)):
                 X, Y = [torch.stack(b).to(TORCH_DEVICE) for b in zip(*batch)]
                 train_mse[i], train_xentropy[i] = self.model.update(X, Y)
 
-            for i, batch in enumerate(zip(*test_loaders)):
+            for i, batch in enumerate(zip(*val_loaders)):
                 X, Y = [torch.stack(b).to(TORCH_DEVICE) for b in zip(*batch)]
                 val_mse[i], val_xentropy[i] = self.model.evaluate(X, Y)
 
@@ -161,8 +166,14 @@ class MPC:
                          "tensors": {"model/max_logvar": self.model.net[-1].max_logvar,
                                      "model/min_logvar": self.model.net[-1].min_logvar}}
 
-            # Stop if mean validation mse across all models stops decreasing
-            early_stopping.step(val_mse.mean(), self.model.net, info_step)
+            if debug_logger is not None:
+                for k, v in info_step["metrics"].items():
+                    debug_logger.log_scalar(k, v, epoch)
+                for k, v in info_step["tensors"].items():
+                    debug_logger.log_histogram(k, v, epoch)
+
+            # Stop if mean validation cross-entropy across all models stops decreasing
+            early_stopping.step(val_xentropy.mean(), self.model.net, info_step)
 
         # Load policy with best validation loss
         info_best = early_stopping.load_best(self.model.net)

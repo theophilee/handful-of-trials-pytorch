@@ -9,7 +9,7 @@ from config import get_config
 from utils import *
 
 
-ALLOWED_ENVS = ["cartpole", "half_cheetah", "swimmer"]
+ALLOWED_ENVS = ["cartpole", "half_cheetah", "swimmer", "pusher"]
 
 
 def main(args):
@@ -24,7 +24,7 @@ def main(args):
     cfg.mpc_cfg.model_cfg.ensemble_size = args.ensemble_size
     cfg.mpc_cfg.model_cfg.activation = args.activation
     cfg.exp_cfg.expert_demos = args.expert_demos
-    param_str = f'{args.ensemble_size}_{args.activation}_{args.expert_demos}'
+    param_str = f'{args.activation}_{args.run}'
 
     # Model predictive control policy
     mpc = MPC(cfg.mpc_cfg)
@@ -36,11 +36,21 @@ def main(args):
     exp = Experiment(mpc, policy, args.env, param_str, args.logdir, args.savedir, cfg.exp_cfg)
     #exp.run_behavior_cloning_debug()
     #exp.run_train_model_debug()
+    #exp.run_experiment_debug()
     exp.run_mpc_baseline()
+    #exp.run_experiment()
+    """
+    if args.run == 'mpc_baseline':
+        exp.run_mpc_baseline()
+    elif args.run == 'experiment':
+        exp.run_experiment()
+    else:
+        raise NotImplementedError
+    """
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env', type=str, default='half_cheetah',
+    parser.add_argument('--env', type=str, default='pusher',
                         help='Env name: one of {}.'.format(ALLOWED_ENVS))
     parser.add_argument('--logdir', type=str, default='runs/main',
                         help='Log directory for Tensorboard.')
@@ -54,6 +64,7 @@ if __name__ == "__main__":
                         help='Activation function for dynamics model.')
     parser.add_argument('--expert-demos', default=False, type=lambda x: (str(x).lower() == 'true'),
                         help='If True, add expert demonstrations to dynamics model training set.')
+    parser.add_argument('--run', type=str, default='debug')
     args = parser.parse_args()
 
     main(args)

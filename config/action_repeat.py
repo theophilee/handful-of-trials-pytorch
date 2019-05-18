@@ -4,7 +4,6 @@ class ActionRepeat(object):
         self.amount = amount
         self.task_hor = self._env._max_episode_steps
         self.num_steps = self._env._max_episode_steps // amount
-        self.timestep = self._env.dt * self.amount
 
     @ property
     def observation_space(self):
@@ -13,6 +12,10 @@ class ActionRepeat(object):
     @property
     def action_space(self):
         return self._env.action_space
+
+    @property
+    def dt(self):
+        return self._env.dt
 
     def step(self, action):
         total_reward = 0

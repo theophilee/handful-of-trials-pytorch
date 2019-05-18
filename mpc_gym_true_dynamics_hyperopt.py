@@ -126,12 +126,15 @@ if __name__ == '__main__':
         
     Current best:
         'MyCartpole-v0' {'horizon': 12, 'repeat': 4, 'topk': 50} -> 178 (std = 3 for 10 runs)
-        'MySwimmer-v2' {'horizon': 16, 'repeat': 9, 'topk': 20} -> 223 (std = 13 for 10 runs)
-        'MyHalfCheetah-v2' {'horizon': 12, 'repeat': 4, 'topk': 60} -> 12412 (std = 752 for 10 runs)
+        'MySwimmer-v2' {'horizon': 17, 'repeat': 4, 'topk': 30} -> 312
+        'MyHalfCheetah-v2' {'horizon': 11, 'repeat': 4, 'topk': 40} -> 13907 (std 1541 for 20 runs)
     """
-    space = {'repeat': hp.quniform('repeat', 2, 8, 1),
-             'horizon': hp.quniform('horizon', 10, 25, 1),
-             'topk': hp.quniform('topk', 10, 90, 10)}
+    #space = {'repeat': hp.quniform('repeat', 2, 8, 1),
+    #         'horizon': hp.quniform('horizon', 10, 25, 1),
+    #         'topk': hp.quniform('topk', 10, 90, 10)}
+    space = {'repeat': hp.quniform('repeat', 2, 5, 1),
+             'horizon': hp.quniform('horizon', 10, 20, 1),
+             'topk': hp.quniform('topk', 20, 80, 10)}
 
     while True:
         run_trials(space, objective, 2, 2, ENV)

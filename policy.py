@@ -29,7 +29,7 @@ class Policy:
         # TODO add output non-linearity?
         self.obs_features = obs_features
         self.act_features = env.action_space.shape[0]
-        self.act_high, self.act_low = env.action_space.high, env.action_space.low
+        self.act_bound = env.action_space.high[0]
         self.batch_size = batch_size
         self.obs_preproc = obs_preproc
 
@@ -38,6 +38,7 @@ class Policy:
 
         self.optim = Adam(self.net.parameters(), lr=lr, weight_decay=weight_decay)
         self.criterion = nn.MSELoss()
+        self.has_been_trained = False
 
         # Dataset to train policy
         self.X = torch.empty((0, self.obs_features))
@@ -62,9 +63,16 @@ class Policy:
         self.X = torch.empty((0, self.obs_features))
         self.Y = torch.empty((0, self.act_features))
 
-    def train(self, obs, acts, train_split=0.9, iterative=True):
-        X_new = torch.from_numpy(self.obs_preproc(obs)).float()
-        Y_new = torch.from_numpy(acts).float()
+    def train(self, obs, acts, train_split=0.8, iterative=True):
+        self.has_been_trained = True
+
+        # Preprocess new data
+        if isinstance(obs, np.ndarray):
+            if obs.ndim == 3:
+                obs = obs.reshape(-1, obs.shape[-1])
+                acts = acts.reshape(-1, acts.shape[-1])
+            obs, acts = torch.from_numpy(obs).float(), torch.from_numpy(acts).float()
+        X_new, Y_new = self.obs_preproc(obs), acts
 
         if iterative:
             # Add new data to training set
@@ -75,9 +83,9 @@ class Policy:
         # Compute input statistics for normalization
         self._fit_input_stats(self.X)
 
+        # Compute mse on new test data
         metrics = {}
         if iterative:
-            # Compute mse on new test data
             metrics["policy/mse/test"] = self.criterion(self.predict(X_new.to(TORCH_DEVICE)),
                                                         Y_new.to(TORCH_DEVICE)).item()
 
@@ -88,7 +96,7 @@ class Policy:
         train_loader = DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True)
         val_loader = DataLoader(val_dataset, batch_size=self.batch_size, shuffle=True)
 
-        early_stopping = EarlyStopping(patience=10)
+        early_stopping = EarlyStopping(patience=20)
 
         # Training loop
         while not early_stopping.early_stop:
@@ -124,17 +132,33 @@ class Policy:
         input = (input - self.input_mean) / self.input_std
         return self.net(input)
 
+    @torch.no_grad()
+    def act_parallel(self, obs):
+        """Returns the action that this policy would take for each of the observations in obs.
+
+        Arguments:
+            obs (2D torch.Tensor): Observations (num_obs, obs_features).
+
+        Returns: Actions (2D torch.Tensor).
+        """
+        if not self.has_been_trained:
+            acts = torch.FloatTensor(obs.shape[0], self.act_features)
+            acts = acts.uniform_(-self.act_bound, self.act_bound)
+            return acts
+
+        return self.predict(self.obs_preproc(obs.to(TORCH_DEVICE))).cpu()
+
+    @torch.no_grad()
     def act(self, obs):
         """Returns the action that this policy would take given observation obs.
 
         Arguments:
-            obs (1D numpy.ndarray): The current observation.
+            obs (1D numpy.ndarray): An observation.
 
         Returns: An action (1D numpy.ndarray).
         """
-        obs = self.obs_preproc(obs[np.newaxis])[0]
-        with torch.no_grad():
-            return numpy_from_device(self.predict(numpy_to_device(obs)))
+        obs = torch.from_numpy(obs[np.newaxis]).float()
+        return self.act_parallel(obs)[0].numpy()
 
     def _fit_input_stats(self, input):
         # Store data statistics for normalization

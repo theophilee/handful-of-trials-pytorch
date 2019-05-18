@@ -112,16 +112,16 @@ if __name__ == '__main__':
                         help='OpenAI gym environment to load.')
     parser.add_argument('-r', '--repeat', type=int, default=4,
                         help='Number of times to repeat each action for.')
-    parser.add_argument('-e', '--episodes', type=int, default=1,
+    parser.add_argument('-e', '--episodes', type=int, default=20,
                         help='Number of episodes to average over.')
-    parser.add_argument('-l', '--horizon', type=int, default=12,
+    parser.add_argument('-l', '--horizon', type=int, default=11,
                         help='Length of each action sequence to consider.')
     parser.add_argument('-p', '--proposals', type=int, default=1000,
                         help='Number of action sequences to evaluate per iteration.')
-    parser.add_argument('-k', '--topk', type=int, default=100,
+    parser.add_argument('-k', '--topk', type=int, default=40,
                         help='Number of best action sequences to refit belief to.')
     parser.add_argument('-i', '--iterations', type=int, default=10,
                         help='Number of optimization iterations for each action sequence.')
-    parser.add_argument('--savedir', type=str, default='save/mpc_gym_true_dynamics_cmd_line')
+    parser.add_argument('--savedir', type=str, default='save/expert_demonstrations')
     args = parser.parse_args()
     main(args)

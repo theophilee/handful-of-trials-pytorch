@@ -1,12 +1,7 @@
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import TensorDataset
 from functools import partial
 import time
-
-#from torch.multiprocessing import Pool, set_start_method
-#try:
-#    set_start_method('spawn')
-#except RuntimeError:
-#    pass
+import math
 
 from utils import *
 from model import BootstrapEnsemble
@@ -26,12 +21,11 @@ class MPC:
                 .obs_preproc (func): A function which modifies observations before they
                     are passed into the model.
                 .pred_postproc (func): A function which takes the previous observations
-                    and model predictions and returns the input to the cost function on
-                    observations.
+                    and model predictions and returns the next observation.
                 .targ_proc (func): A function which takes current observations and next
                     observations and returns the array of targetets (so that the model
                     learns the mapping obs -> targ_proc(obs, next_obs)).
-                .get_cost (func): A function which computes the cost of a batch of
+                .get_reward (func): A function which computes the reward of a batch of
                     transitions.
 
                 .model_cfg (DotMap): A DotMap of model parameters.
@@ -64,7 +58,7 @@ class MPC:
         self.obs_preproc = args.obs_preproc
         self.pred_postproc = args.pred_postproc
         self.targ_proc = args.targ_proc
-        self.get_cost = args.get_cost
+        self.get_reward = args.get_reward
 
         self.has_been_trained = False
         # Check arguments
@@ -84,7 +78,7 @@ class MPC:
     def _reset_model(self, model_cfg):
         return BootstrapEnsemble(**model_cfg)
 
-    def train(self, obs, acts, train_split=0.9, iterative=True, reset_model=False,
+    def train(self, obs, acts, train_split=0.8, iterative=True, reset_model=False,
               debug_logger=None):
         """ Train bootstrap ensemble model.
 
@@ -108,9 +102,9 @@ class MPC:
             X_new = np.concatenate([self.obs_preproc(obs[:-1]), acts], axis=1)
             Y_new = self.targ_proc(obs[:-1], obs[1:])
         elif obs.ndim == 3:
-            X_new = np.concatenate([np.concatenate([self.obs_preproc(o[:-1]), a], axis=1)
-                                    for o, a in zip(obs, acts)], axis=0)
-            Y_new = np.concatenate([self.targ_proc(o[:-1], o[1:]) for o in obs], axis=0)
+            X_new = [np.concatenate([self.obs_preproc(o[:-1]), a], axis=1) for o, a in zip(obs, acts)]
+            Y_new = [self.targ_proc(o[:-1], o[1:]) for o in obs]
+            X_new, Y_new = np.concatenate(X_new, axis=0), np.concatenate(Y_new, axis=0)
         X_new, Y_new = torch.from_numpy(X_new).float(), torch.from_numpy(Y_new).float()
 
         # Add new data to training set
@@ -122,40 +116,46 @@ class MPC:
         # Store input statistics for normalization
         self.model.fit_input_stats(self.X)
 
-        # Create bootstrap ensemble train-val splits
-        dataset = TensorDataset(self.X, self.Y)
-        train_size = int(train_split * len(self.X))
-        val_size = len(self.X) - train_size
-        train_loaders, val_loaders = [], []
-        for _ in range(self.num_nets):
-            train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
-            train_loaders.append(DataLoader(train_dataset, batch_size=self.batch_size, shuffle=True))
-            val_loaders.append(DataLoader(val_dataset, batch_size=self.batch_size, shuffle=True))
-
         # Record mse and cross-entropy on new test data
         metrics = {}
         if iterative:
             mse, xentropy = self.model.evaluate(X_new.to(TORCH_DEVICE), Y_new.to(TORCH_DEVICE))
             metrics["model/mse/test"], metrics["model/xentropy/test"] = mse.mean(), xentropy.mean()
 
-        early_stopping = EarlyStopping(patience=12)
+        dataset = TensorDataset(self.X, self.Y)
+        train_size = int(train_split * len(dataset))
+        val_size = len(dataset) - train_size
+        train_batches = math.ceil(train_size / self.batch_size)
+        val_batches = math.ceil(val_size / self.batch_size)
+
+        # Bootstrap ensemble train and validation indexes
+        idxs = [torch.randperm(len(dataset)) for _ in range(self.num_nets)]
+        train_idxs = torch.stack([i[:train_size] for i in idxs])
+        val_idxs = torch.stack([i[train_size:] for i in idxs])
+
+        early_stopping = EarlyStopping(patience=15)
         start = time.time()
 
         # Training loop
         epoch = 0
         while not early_stopping.early_stop:
             epoch += 1
-            train_mse = torch.zeros((len(train_loaders[0]), self.num_nets))
-            train_xentropy = np.zeros((len(train_loaders[0]), self.num_nets))
-            val_mse = torch.zeros((len(val_loaders[0]), self.num_nets))
-            val_xentropy = torch.zeros((len(val_loaders[0]), self.num_nets))
+            train_idxs_epoch = train_idxs[:, torch.randperm(train_size)]
+            val_idxs_epoch = val_idxs[:, torch.randperm(val_size)]
 
-            for i, batch in enumerate(zip(*train_loaders)):
-                X, Y = [torch.stack(b).to(TORCH_DEVICE) for b in zip(*batch)]
+            train_mse = torch.zeros((train_batches, self.num_nets))
+            train_xentropy = np.zeros((train_batches, self.num_nets))
+            val_mse = torch.zeros((val_batches, self.num_nets))
+            val_xentropy = torch.zeros((val_batches, self.num_nets))
+
+            for i in range(train_batches):
+                X, Y = dataset[train_idxs_epoch[:, i*self.batch_size:(i+1)*self.batch_size]]
+                X, Y = X.to(TORCH_DEVICE), Y.to(TORCH_DEVICE)
                 train_mse[i], train_xentropy[i] = self.model.update(X, Y)
 
-            for i, batch in enumerate(zip(*val_loaders)):
-                X, Y = [torch.stack(b).to(TORCH_DEVICE) for b in zip(*batch)]
+            for i in range(val_batches):
+                X, Y = dataset[val_idxs_epoch[:, i*self.batch_size:(i+1)*self.batch_size]]
+                X, Y = X.to(TORCH_DEVICE), Y.to(TORCH_DEVICE)
                 val_mse[i], val_xentropy[i] = self.model.evaluate(X, Y)
 
             # Record epoch train/val mse and cross-entropy averaged across models
@@ -191,75 +191,101 @@ class MPC:
         Returns: Action (1D numpy.ndarray).
         """
         if not self.has_been_trained:
-            return np.random.uniform(self.act_bound, -self.act_bound, (self.act_features,))
+            return np.random.uniform(-self.act_bound, self.act_bound, (self.act_features,))
 
-        return self.act_parallel(obs[np.newaxis])[0]
+        return self.act_parallel(torch.from_numpy(obs[np.newaxis]).float())[0].cpu().numpy()
 
     def act_parallel(self, obs):
         """Returns the action that this controller would take for each of the observations
         in obs. Used to sample multiple rollouts in parallel.
 
         Arguments:
-            obs (2D numpy.ndarray): Observations (num_obs, obs_features).
+            obs (2D torch.Tensor): Observations (num_obs, obs_features).
 
-        Returns: Actions (2D numpy.ndarray).
+        Returns: Actions (2D torch.Tensor).
         """
-        plans = self.optimizer.obtain_solution(numpy_to_device(obs), self._compile_cost)
+        plans = self.optimizer.obtain_solution(obs, self._compile_score)
         # Return the first action of each plan
-        return numpy_from_device(plans[:, 0])
+        return plans[:, 0]
 
     @torch.no_grad()
-    def _compile_cost(self, plans, cur_obs):
-        """Compute cost of plans (sequences of actions) starting at observations in
+    def sample_imaginary_rollouts(self, num, actor):
+        """Sample multiple rollouts generated by a given actor under the learned dynamics in
+        parallel.
+
+        Arguments:
+            num (int): Number of rollouts to sample.
+            actor : Must provide an act_parallel() function operating on 2D torch.Tensor.
+
+        Returns:
+            obs (3D torch.Tensor): Trajectories of observations.
+            acts (3D torch.Tensor): Trajectories of actions.
+            avg_score (float): Average score.
+        """
+        # TODO split predictions among models in ensemble instead of averaging?
+        # We use the environment only for its start state distribution
+        observations = [torch.tensor([self.env.reset() for _ in range(num)]).float()]
+        actions, scores = [], torch.zeros(num).to(TORCH_DEVICE)
+
+        for t in range(self.env.num_steps):
+            actions.append(actor.act_parallel(observations[t]))
+            obs, acts = observations[t].to(TORCH_DEVICE), actions[t].to(TORCH_DEVICE)
+            next_obs = self._predict_next_obs_average(obs, acts)
+            scores += self.get_reward(obs, acts, next_obs)
+            observations.append(next_obs.cpu())
+
+        return torch.cat(observations)[:-1], torch.cat(actions), scores.mean().item()
+
+    @torch.no_grad()
+    def _compile_score(self, plans, cur_obs, batch_size=20000):
+        """Compute score of plans (sequences of actions) starting at observations in
         cur_obs under the learned dynamics.
 
         Arguments:
             plans (3D torch.Tensor): Sequences of actions of shape
                 (num_obs, num_plans, plan_hor * act_features).
-            cur_obs (2D torch.Tensor): Starting observations to compile costs of shape
+            cur_obs (2D torch.Tensor): Starting observations to compile scores of shape
                 (num_obs, obs_features).
+            batch_size (int: Batch size for parallel computation.
 
-       Returns:
-           costs (2D torch.Tensor): Cost of plans of shape (num_obs, num_plans).
-       """
+        Returns:
+            scores (2D torch.Tensor): Score of plans of shape (num_obs, num_plans).
+        """
+        assert batch_size % self.num_part == 0
         num_obs, num_plans = plans.shape[:2]
 
         # Reshape plans for parallel computation
         # 1 - (num_obs, num_plans, plan_hor * act_features)
         # 2 - (num_obs, num_plans, plan_hor, act_features)
-        # 3 - (plan_hor, num_obs, num_plans, act_features)
-        # 4 - (plan_hor, num_obs, num_plans, num_part, act_features)
-        # 5 - (plan_hor, num_obs * num_plans * num_part, act_features)
+        # 3 - (num_obs, num_plans, num_part, plan_hor, act_features)
+        # 4 - (num_obs * num_plans * num_part, plan_hor, act_features)
         plans = plans.view(num_obs, num_plans, self.plan_hor, self.act_features)
-        plans = plans.permute(2, 0, 1, 3)
-        plans = plans.unsqueeze(-2).expand(-1, -1, -1, self.num_part, -1).contiguous()
-        plans = plans.view(self.plan_hor, -1, self.act_features)
+        plans = plans.unsqueeze(2).expand(-1, -1, self.num_part, -1, -1).contiguous()
+        plans = plans.view(-1, self.plan_hor, self.act_features)
 
         # Reshape observations for parallel computation
         # 1 - (num_obs, obs_features)
         # 2 - (num_obs * num_plans * num_part, obs_features)
         obs = cur_obs.repeat(num_plans * self.num_part, 1)
 
-        # Compute costs in parallel
+        dataset = TensorDataset(obs, plans)
+        num_batches = math.ceil(len(dataset) / batch_size)
+        scores = torch.zeros(num_obs * num_plans * self.num_part).to(TORCH_DEVICE)
+
+        # Compute scores in parallel
         # Across starting observations, plans per observation and particles per plan
-        costs = torch.zeros(num_obs, num_plans, self.num_part).to(TORCH_DEVICE)
+        for i in range(num_batches):
+            obs, plans = dataset[i * batch_size:(i+1) * batch_size]
+            obs, plans = obs.to(TORCH_DEVICE), plans.to(TORCH_DEVICE)
+            for t in range(self.plan_hor):
+                acts = plans[:, t]
+                next_obs = self._predict_next_obs_divide(obs, acts)
+                scores[i * batch_size:(i+1) * batch_size] += self.get_reward(obs, acts, next_obs)
+                obs = next_obs
 
-        for t in range(self.plan_hor):
-            acts = plans[t]
-
-            # Predict next observation
-            next_obs = self._predict_next_obs_divide(obs, acts)
-
-            # Compute cost of transitions
-            cost = self.get_cost(obs, acts, next_obs)
-            costs += cost.view(num_obs, num_plans, self.num_part)
-
-            obs = next_obs
-
-        # Average cost over particles
-        costs = costs.mean(dim=-1)
-
-        return costs
+        # Average score over particles
+        scores = scores.view(num_obs, num_plans, self.num_part).mean(dim=-1)
+        return scores.cpu()
 
     def _predict_next_obs_average(self, obs, acts):
         """Predict next observation by averaging predictions of all models in ensemble.
@@ -273,9 +299,8 @@ class MPC:
         proc_obs = self.obs_preproc(obs)
 
         # Predict next observations by averaging ensemble predictions
-        proc_obs = proc_obs.repeat(self.num_nets, 1, 1)
-        acts = acts.repeat(self.num_nets, 1, 1)
-        preds = self.model.sample(torch.cat((proc_obs, acts), dim=-1))
+        input = torch.cat((proc_obs, acts), dim=-1).repeat(self.num_nets, 1, 1)
+        preds = self.model.sample(input)
         avg_preds = preds.mean(dim=0)
 
         # Postprocess predictions

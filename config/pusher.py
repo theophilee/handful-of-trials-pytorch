@@ -1,4 +1,6 @@
 import gym
+import numpy as np
+import torch
 from dotmap import DotMap
 
 from .action_repeat import ActionRepeat
@@ -6,8 +8,8 @@ from .action_repeat import ActionRepeat
 
 class Config:
     def __init__(self):
-        env = gym.make("MySwimmer-v2")
-        action_repeat = 9
+        env = gym.make("MyPusher-v2")
+        action_repeat = 1
         self.env = ActionRepeat(env, action_repeat)
 
         self.obs_features = self.env.observation_space.shape[0]
@@ -18,38 +20,46 @@ class Config:
         return obs
 
     def pred_postproc(self, obs, pred):
-        return obs + pred
+        # Last three dimensions are the static goal
+        if isinstance(obs, np.ndarray):
+            return np.concatenate([pred + obs[:, :-3], obs[:, -3:]], axis=1)
+        elif isinstance(obs, torch.Tensor):
+            return torch.cat([pred + obs[:, :-3], obs[:, -3:]], dim=1)
 
     def targ_proc(self, obs, next_obs):
-        return next_obs - obs
+        # Last three dimensions are the static goal
+        return next_obs[:, :-3] - obs[:, :-3]
 
     def get_reward(self, obs, act, next_obs):
-        reward_act = -1e-4 * (act ** 2).sum(dim=1)
-        reward_run = (next_obs[:, 0] - obs[:, 0]) / self.env.dt
-        return reward_act + reward_run
+        tip_pos, obj_pos, goal_pos = obs[:, 14:17], obs[:, 17:20], obs[:, 20:23]
+        reward_near = -torch.norm(obj_pos - tip_pos, dim=1)
+        reward_dist = -torch.norm(obj_pos - goal_pos, dim=1)
+        reward_ctrl = -(act ** 2).sum(dim=1)
+        reward = reward_dist + 0.1 * reward_ctrl + 0.5 * reward_near
+        return reward
 
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,
                           "expert_demos": False,
-                          "init_rollouts": 5,
-                          "total_rollouts": 300,
+                          "init_rollouts": 1,
+                          "total_rollouts": 100,
                           "train_freq": 1,
                           "imaginary_rollouts": 30})
 
         model_cfg = DotMap({"ensemble_size": 5,
                             "in_features": self.obs_features_preprocessed + self.act_features,
-                            "out_features": self.obs_features,
+                            "out_features": self.obs_features - 3,
                             "hid_features": [200, 200, 200, 200],
-                            "activation": "relu",
+                            "activation": "swish",
                             "lr": 1e-3,
                             "weight_decay": 1e-4})
 
         opt_cfg = DotMap({"iterations": 10,
                           "popsize": 1000,
-                          "num_elites": 30})
+                          "num_elites": 50})
 
         mpc_cfg = DotMap({"env": self.env,
-                          "plan_hor": 16,
+                          "plan_hor": 25,
                           "num_part": 20,
                           "batch_size": 32,
                           "obs_preproc": self.obs_preproc,
@@ -63,7 +73,7 @@ class Config:
                              "obs_features": self.obs_features_preprocessed,
                              "hid_features": [400, 300],
                              "activation": "relu",
-                             "batch_size": 250,
+                             "batch_size": 32,
                              "lr": 1e-3,
                              "weight_decay": 0.,
                              "obs_preproc": self.obs_preproc})

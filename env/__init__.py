@@ -18,3 +18,9 @@ register(
     entry_point='env.swimmer:SwimmerEnv',
     max_episode_steps=1000,
 )
+
+register(
+    id='MyPusher-v2',
+    entry_point='env.pusher:PusherEnv',
+    max_episode_steps=100,
+)

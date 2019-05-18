@@ -52,7 +52,7 @@ class Logger:
 
 class EarlyStopping:
     """Early stops the training if validation loss doesn't improve after a given patience."""
-    def __init__(self, patience=10, verbose=True):
+    def __init__(self, patience=10, verbose=False):
         """
         Arguments:
             patience (int): How long to wait after last time validation loss improved.
@@ -64,11 +64,11 @@ class EarlyStopping:
         self.val_loss_min = np.Inf
         self.ckpt_file = str(uuid.uuid1()) + '.ckpt'
 
-    def step(self, val_loss, model, info={}):
+    def step(self, val_loss, network, info={}):
         """
         Arguments:
             val_loss (float): Validation loss.
-            model (torch.nn.Module): Network to save if validation loss decreases.
+            network (torch.nn.Module): Network to save if validation loss decreases.
             info (dict): Dictionary with extra information, to be loaded at the end.
         """
         if val_loss >= self.val_loss_min:
@@ -78,21 +78,21 @@ class EarlyStopping:
             if self.counter >= self.patience:
                 self.early_stop = True
         else:
-            self._save_ckpt(val_loss, model, info)
+            self._save_ckpt(val_loss, network, info)
             self.val_loss_min = val_loss
             self.counter = 0
 
-    def _save_ckpt(self, val_loss, model, info):
-        # Save model and additional info when validation loss decreases
+    def _save_ckpt(self, val_loss, network, info):
+        # Save network and additional info when validation loss decreases
         if self.verbose:
-            print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}), saving model.')
-        torch.save(model.state_dict(), self.ckpt_file)
+            print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}), saving network.')
+        torch.save(network.state_dict(), self.ckpt_file)
         self.info_best = info
 
-    def load_best(self, model):
-        # Load best model, clean-up checkpoint file and return additional info for best model
+    def load_best(self, network):
+        # Load best network, clean-up checkpoint file and return additional info for best network
         if self.verbose:
-            print(f'Loading best model with validation loss {self.val_loss_min:.6f}.')
-        model.load_state_dict(torch.load(self.ckpt_file))
+            print(f'Loading best network with validation loss {self.val_loss_min:.6f}.')
+        network.load_state_dict(torch.load(self.ckpt_file))
         os.remove(self.ckpt_file)
         return self.info_best

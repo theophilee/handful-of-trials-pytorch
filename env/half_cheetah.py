@@ -5,7 +5,6 @@ from gym.envs.mujoco import mujoco_env
 
 
 class HalfCheetahEnv(mujoco_env.MujocoEnv, utils.EzPickle):
-    # TODO fix second observation
     def __init__(self):
         dir_path = os.path.dirname(os.path.realpath(__file__))
         mujoco_env.MujocoEnv.__init__(self, '%s/assets/half_cheetah.xml' % dir_path, 5)

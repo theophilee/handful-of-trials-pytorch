@@ -60,14 +60,14 @@ class Config:
                             "lr": 1e-3,
                             "weight_decay": 1e-4})
 
-        opt_cfg = DotMap({"iterations": 10,
+        opt_cfg = DotMap({"iterations": 5,
                           "popsize": 1000,
                           "num_elites": 50})
 
         mpc_cfg = DotMap({"env": self.env,
                           "plan_hor": 25,
                           "num_part": 20,
-                          "batch_size": 32,
+                          "batches_per_epoch": 100,
                           "obs_preproc": self.obs_preproc,
                           "pred_postproc": self.pred_postproc,
                           "targ_proc": self.targ_proc,

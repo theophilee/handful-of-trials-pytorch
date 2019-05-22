@@ -41,7 +41,7 @@ class Config:
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,
                           "expert_demos": False,
-                          "init_rollouts": 1,
+                          "init_rollouts": 2,
                           "total_rollouts": 100,
                           "train_freq": 1,
                           "imaginary_rollouts": 30})
@@ -50,18 +50,18 @@ class Config:
                             "in_features": self.obs_features_preprocessed + self.act_features,
                             "out_features": self.obs_features - 3,
                             "hid_features": [200, 200, 200, 200],
-                            "activation": "swish",
+                            "activation": "tanh",
                             "lr": 1e-3,
                             "weight_decay": 1e-4})
 
-        opt_cfg = DotMap({"iterations": 10,
+        opt_cfg = DotMap({"iterations": 5,
                           "popsize": 1000,
                           "num_elites": 50})
 
         mpc_cfg = DotMap({"env": self.env,
                           "plan_hor": 25,
                           "num_part": 20,
-                          "batch_size": 32,
+                          "batches_per_epoch": 100,
                           "obs_preproc": self.obs_preproc,
                           "pred_postproc": self.pred_postproc,
                           "targ_proc": self.targ_proc,

@@ -17,7 +17,7 @@ class MPC:
                 .env (gym.env): Environment for which this controller will be used.
                 .plan_hor (int): The planning horizon that will be used in optimization.
                 .num_part (int): Number of particles used for propagation method.
-                .batch_size (int): Batch size.
+                .batches_per_epoch (int): Number of batches per training epoch.
                 .obs_preproc (func): A function which modifies observations before they
                     are passed into the model.
                 .pred_postproc (func): A function which takes the previous observations
@@ -52,7 +52,7 @@ class MPC:
 
         self.plan_hor = args.plan_hor
         self.num_part = args.num_part
-        self.batch_size = args.batch_size
+        self.batches_per_epoch = args.batches_per_epoch
         self.num_nets = args.model_cfg.ensemble_size
 
         self.obs_preproc = args.obs_preproc
@@ -125,13 +125,15 @@ class MPC:
         dataset = TensorDataset(self.X, self.Y)
         train_size = int(train_split * len(dataset))
         val_size = len(dataset) - train_size
-        train_batches = math.ceil(train_size / self.batch_size)
-        val_batches = math.ceil(val_size / self.batch_size)
 
         # Bootstrap ensemble train and validation indexes
         idxs = [torch.randperm(len(dataset)) for _ in range(self.num_nets)]
         train_idxs = torch.stack([i[:train_size] for i in idxs])
         val_idxs = torch.stack([i[train_size:] for i in idxs])
+
+        batch_size = int(len(dataset) / self.batches_per_epoch)
+        train_batches = int(train_split * self.batches_per_epoch)
+        val_batches = self.batches_per_epoch - train_batches
 
         early_stopping = EarlyStopping(patience=15)
         start = time.time()
@@ -149,12 +151,12 @@ class MPC:
             val_xentropy = torch.zeros((val_batches, self.num_nets))
 
             for i in range(train_batches):
-                X, Y = dataset[train_idxs_epoch[:, i*self.batch_size:(i+1)*self.batch_size]]
+                X, Y = dataset[train_idxs_epoch[:, i*batch_size:(i+1)*batch_size]]
                 X, Y = X.to(TORCH_DEVICE), Y.to(TORCH_DEVICE)
                 train_mse[i], train_xentropy[i] = self.model.update(X, Y)
 
             for i in range(val_batches):
-                X, Y = dataset[val_idxs_epoch[:, i*self.batch_size:(i+1)*self.batch_size]]
+                X, Y = dataset[val_idxs_epoch[:, i*batch_size:(i+1)*batch_size]]
                 X, Y = X.to(TORCH_DEVICE), Y.to(TORCH_DEVICE)
                 val_mse[i], val_xentropy[i] = self.model.evaluate(X, Y)
 

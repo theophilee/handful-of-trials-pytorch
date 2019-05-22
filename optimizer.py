@@ -1,8 +1,6 @@
 import torch
 from torch.distributions import Normal
 
-from utils import TORCH_DEVICE
-
 
 class CEMOptimizer:
     def __init__(self, action_space, horizon, popsize, num_elites, iterations):

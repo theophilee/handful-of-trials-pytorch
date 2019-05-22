@@ -1,9 +1,3 @@
-"""
-CEM planning on gym environments using the ground truth dynamics.
-Example usage:
-python mpc_gym_true_dynamics_cmd_line.py MyHalfCheetah-v2 -r 4 -l 12
-"""
-import os
 import argparse
 import env # Register environments
 import numpy as np
@@ -59,7 +53,7 @@ def evaluate(actions, state):
     return score
 
 
-def cem_planner(pool, action_space, state, horizon, proposals, topk, iterations):
+def gaussian_cem(state, pool, action_space, horizon, proposals, topk, iterations):
     action_bound = action_space.high[0]
     mean = np.zeros((horizon,) + action_space.shape)
     std = np.ones((horizon,) + action_space.shape) * action_bound
@@ -70,7 +64,24 @@ def cem_planner(pool, action_space, state, horizon, proposals, topk, iterations)
         elites = plans[np.argsort(scores)][-topk:]
         mean, std = elites.mean(axis=0), elites.std(axis=0)
 
+    # Return first action of mean of last iteration
     return mean[0].clip(-action_bound, action_bound)
+
+
+def nonparametric_cem(state, pool, action_space, horizon, proposals, topk, iterations, sigma):
+    action_bound = action_space.high[0]
+    plans = np.random.randn(proposals, horizon, *action_space.shape) * action_bound
+
+    for _ in range(iterations - 1):
+        scores = pool.map(partial(evaluate, state=state), plans.clip(-action_bound, action_bound))
+        elites = plans[np.argsort(scores)][-topk:]
+        means = elites[np.random.randint(topk, size=proposals)]
+        noise = np.random.randn(*means.shape) * sigma * action_bound
+        plans = means + noise
+
+    # Return first action of best plan of last iteration
+    scores = pool.map(partial(evaluate, state=state), plans.clip(-action_bound, action_bound))
+    return plans[np.argsort(scores)][-1, 0].clip(-action_bound, action_bound)
 
 
 def main(args):
@@ -79,6 +90,14 @@ def main(args):
 
     # Pool of workers, each has its own copy of global environment variable
     pool = Pool(32, initializer, [env])
+
+    if args.algo == 'gaussian':
+        planner = partial(gaussian_cem, pool=pool, action_space=env.action_space, horizon=args.horizon,
+                          proposals=args.proposals, topk=args.topk, iterations=args.iterations)
+    elif args.algo == 'nonparametric':
+        planner = partial(nonparametric_cem, pool=pool, action_space=env.action_space, horizon=args.horizon,
+                          proposals=args.proposals, topk=args.topk, iterations=args.iterations,
+                          sigma = args.sigma)
 
     scores = np.zeros(args.episodes)
     observations = np.zeros((args.episodes, env.num_steps + 1) + env.observation_space.shape)
@@ -89,32 +108,29 @@ def main(args):
 
         for t in range(env.num_steps):
             state = env.sim.get_state()
-            actions[i, t] = cem_planner(pool, env.action_space, state, args.horizon,
-                                        args.proposals, args.topk, args.iterations)
+            actions[i, t] = planner(state)
             observations[i, t + 1], reward, _, _ = env.step(actions[i, t])
             scores[i] += reward
+            print(scores[i])
 
-        print(scores[i])
+        #print(scores[i])
 
+    print(f'{args.algo}, repeat={args.repeat}, horizon={args.horizon}, proposals={args.proposals}')
     print('Mean score:         ', scores.mean())
     print('Standard deviation: ', scores.std())
-
-    path = os.path.join(args.savedir, args.env)
-    if not os.path.exists(path):
-        os.makedirs(path)
-    np.save(os.path.join(path, 'obs'), observations)
-    np.save(os.path.join(path, 'act'), actions)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('env',
                         help='OpenAI gym environment to load.')
-    parser.add_argument('-r', '--repeat', type=int, default=4,
+    parser.add_argument('algo',
+                        help='CEM algorithm to use, one of "gaussian" or "nonparametric"')
+    parser.add_argument('-r', '--repeat', type=int, default=1,
                         help='Number of times to repeat each action for.')
-    parser.add_argument('-e', '--episodes', type=int, default=20,
+    parser.add_argument('-e', '--episodes', type=int, default=1,
                         help='Number of episodes to average over.')
-    parser.add_argument('-l', '--horizon', type=int, default=11,
+    parser.add_argument('-l', '--horizon', type=int, default=30,
                         help='Length of each action sequence to consider.')
     parser.add_argument('-p', '--proposals', type=int, default=1000,
                         help='Number of action sequences to evaluate per iteration.')
@@ -122,6 +138,7 @@ if __name__ == '__main__':
                         help='Number of best action sequences to refit belief to.')
     parser.add_argument('-i', '--iterations', type=int, default=10,
                         help='Number of optimization iterations for each action sequence.')
-    parser.add_argument('--savedir', type=str, default='save/expert_demonstrations')
+    parser.add_argument('--sigma', type=float, default=0.1,
+                        help='standard deviation of noise for nonparametric version')
     args = parser.parse_args()
     main(args)

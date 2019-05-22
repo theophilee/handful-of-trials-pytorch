@@ -65,8 +65,8 @@ def cem_planner(pool, action_space, state, horizon, proposals, topk, iterations)
     for _ in range(iterations):
         plans = np.random.normal(mean, std, size=(proposals,) + mean.shape)
         scores = pool.map(partial(evaluate, state=state), plans.clip(-action_bound, action_bound))
-        plans = plans[np.argsort(scores)]
-        mean, std = plans[-topk:].mean(axis=0), plans[-topk:].std(axis=0)
+        elites = plans[np.argsort(scores)][-topk:]
+        mean, std = elites.mean(axis=0), elites.std(axis=0)
 
     return mean[0].clip(-action_bound, action_bound)
 
@@ -128,10 +128,17 @@ if __name__ == '__main__':
         'MyCartpole-v0' {'horizon': 12, 'repeat': 4, 'topk': 50} -> 178 (std = 3 for 10 runs)
         'MySwimmer-v2' {'horizon': 17, 'repeat': 4, 'topk': 30} -> 312
         'MyHalfCheetah-v2' {'horizon': 11, 'repeat': 4, 'topk': 40} -> 13907 (std 1541 for 20 runs)
+        
+    MySwimmer-v2
+    space = {'repeat': hp.quniform('repeat', 2, 8, 1),
+             'horizon': hp.quniform('horizon', 10, 25, 1),
+             'topk': hp.quniform('topk', 10, 90, 10)}
+             
+    MyHalfCheetah-v2
+    space = {'repeat': hp.quniform('repeat', 2, 5, 1),
+             'horizon': hp.quniform('horizon', 10, 20, 1),
+             'topk': hp.quniform('topk', 20, 80, 10)}
     """
-    #space = {'repeat': hp.quniform('repeat', 2, 8, 1),
-    #         'horizon': hp.quniform('horizon', 10, 25, 1),
-    #         'topk': hp.quniform('topk', 10, 90, 10)}
     space = {'repeat': hp.quniform('repeat', 2, 5, 1),
              'horizon': hp.quniform('horizon', 10, 20, 1),
              'topk': hp.quniform('topk', 20, 80, 10)}

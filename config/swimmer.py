@@ -7,7 +7,7 @@ from .action_repeat import ActionRepeat
 class Config:
     def __init__(self):
         env = gym.make("MySwimmer-v2")
-        action_repeat = 9
+        action_repeat = 1
         self.env = ActionRepeat(env, action_repeat)
 
         self.obs_features = self.env.observation_space.shape[0]
@@ -40,18 +40,18 @@ class Config:
                             "in_features": self.obs_features_preprocessed + self.act_features,
                             "out_features": self.obs_features,
                             "hid_features": [200, 200, 200, 200],
-                            "activation": "relu",
+                            "activation": "tanh",
                             "lr": 1e-3,
                             "weight_decay": 1e-4})
 
-        opt_cfg = DotMap({"iterations": 10,
+        opt_cfg = DotMap({"iterations": 5,
                           "popsize": 1000,
-                          "num_elites": 30})
+                          "num_elites": 50})
 
         mpc_cfg = DotMap({"env": self.env,
-                          "plan_hor": 16,
+                          "plan_hor": 25,
                           "num_part": 20,
-                          "batch_size": 32,
+                          "batches_per_epoch": 100,
                           "obs_preproc": self.obs_preproc,
                           "pred_postproc": self.pred_postproc,
                           "targ_proc": self.targ_proc,

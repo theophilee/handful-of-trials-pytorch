@@ -8,10 +8,8 @@ from utils import Logger
 
 def print_rollout_stats(obs, acts, score):
     print("Cumulative reward ", score)
-    print("Action min {}, max {}, mean {}, std {}".format(
-        acts.min(), acts.max(), acts.mean(), acts.std()))
-    print("Obs min {}, max {}, mean {}, std {}".format(
-        obs.min(), obs.max(), obs.mean(), obs.std()))
+    print(f"Action min {acts.min()}, max {acts.max()}, mean {acts.mean()}, std {acts.std()}")
+    print(f"Obs min {obs.min()}, max {obs.max()}, mean {obs.mean()}, std {obs.std()}")
 
 
 class Experiment:
@@ -48,12 +46,12 @@ class Experiment:
         self.imaginary_rollouts = args.imaginary_rollouts
 
         self.env_str = env_str
-        self.savedir = os.path.join(savedir, env_str)
+        self.savedir = os.path.join(savedir, f"{env_str}_{param_str}")
         if not os.path.exists(self.savedir):
             os.makedirs(self.savedir)
 
         # TensorboardX summary writer
-        self.logger = Logger(os.path.join(logdir, "{}_{}".format(env_str, param_str)))
+        self.logger = Logger(os.path.join(logdir, f"{env_str}_{param_str}"))
 
     def run_mpc_baseline(self):
         """Model predictive control baseline, no parameterized policy.
@@ -90,6 +88,9 @@ class Experiment:
             for k, v in tensors.items():
                 self.logger.log_histogram(k, v, step)
 
+            # Save model
+            torch.save(self.mpc, os.path.join(self.savedir, 'mpc.pth'))
+
     def run_behavior_cloning_debug(self):
         """Train parameterized policy with behaviour cloning on saved expert demonstrations.
         """
@@ -119,8 +120,7 @@ class Experiment:
         for k, v in metrics.items():
             print(f'{k}: {v}')
 
-        torch.save(self.mpc, os.path.join(self.savedir, 'model_expert.pth'))
-        #torch.save(self.mpc, os.path.join(self.savedir, 'model_random.pth'))
+        torch.save(self.mpc, os.path.join(self.savedir, 'mpc.pth'))
 
     def run_experiment_debug(self):
         """Train parameterized policy by imitation learning (DAgger) on trajectories
@@ -130,8 +130,7 @@ class Experiment:
         self.run_train_model_debug()
 
         # Load pretrained model
-        self.mpc = torch.load(os.path.join(self.savedir, 'model_expert.pth'))
-        #self.mpc = torch.load(os.path.join(self.savedir, 'model_random.pth'))
+        self.mpc = torch.load(os.path.join(self.savedir, 'mpc.pth'))
 
         # Load pretrained expert
         expert = torch.load(os.path.join(self.savedir, 'policy.pth'))

@@ -69,16 +69,17 @@ class BootstrapEnsemble:
         xentropy = mse * inv_var + logvar
         loss = xentropy.mean()
 
-        # Special regularization for max and min log variance parameters
-        loss += 0.01 * (self.net[-1].max_logvar.sum() - self.net[-1].min_logvar.sum())
+        # Small special regularization for max and min log variance parameters
+        reg = 1e-4 * (self.net[-1].max_logvar.mean() - self.net[-1].min_logvar.mean())
+        loss += reg
 
         # Take a gradient step
         self.optim.zero_grad()
         loss.backward()
         self.optim.step()
 
-        # Return per model mean squared error and cross-entropy
-        return mse.mean((-2, -1)).cpu().detach(), xentropy.mean((-2, -1)).cpu().detach()
+        # Return per model mean squared error and cross-entropy and special regularization
+        return mse.mean((-2, -1)).cpu().detach(), xentropy.mean((-2, -1)).cpu().detach(), reg
 
     def evaluate(self, input, targ):
         mean, logvar = self.predict(input)

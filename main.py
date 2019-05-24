@@ -22,10 +22,10 @@ def main(args):
 
     # Overwrite configuration with command line arguments
     cfg.mpc_cfg.model_cfg.ensemble_size = args.ensemble_size
-    cfg.mpc_cfg.model_cfg.activation = args.activation
-    cfg.mpc_cfg.batches_per_epoch = args.batches_per_epoch
+    cfg.mpc_cfg.model_cfg.hid_features = args.hid_features
+    cfg.mpc_cfg.opt_cfg.iterations = args.iterations
     cfg.exp_cfg.train_freq = args.train_freq
-    param_str = f'{args.ensemble_size}_{args.activation}_{args.batches_per_epoch}_{args.train_freq}'
+    param_str = f'{args.ensemble_size}_{args.hid_features}_{args.iterations}_{args.train_freq}'
 
     # Model predictive control policy
     mpc = MPC(cfg.mpc_cfg)
@@ -54,10 +54,11 @@ if __name__ == "__main__":
                         help='Random seed.')
     parser.add_argument('--ensemble-size', type=int, default=5,
                         help='Number of bootstrap ensemble dynamics models.')
-    parser.add_argument('--activation', type=str, default='tanh',
-                        help='Activation function for dynamics model.')
-    parser.add_argument('--batches_per_epoch', type=int, default=100,
-                        help='Number of batches per dynamics model training epoch.')
+    parser.add_argument('--hid_features', default=[200, 200, 200, 200],
+                        type=lambda l: [int(x) for x in l.split(',')],
+                        help='Hidden layers of dynamics model.')
+    parser.add_argument('--iterations', type=int, default=5,
+                        help='Number of iterations to perform during CEM optimization.')
     parser.add_argument('--train_freq', type=int, default=1,
                         help='Number of episodes to wait for before retraining model.')
     parser.add_argument('--expert-demos', default=False, type=lambda x: (str(x).lower() == 'true'),

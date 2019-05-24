@@ -38,7 +38,7 @@ class MPC:
                     .weight_decay (float): Weight decay for model parameters.
 
                 .opt_cfg DotMap): A DotMap of optimizer parameters.
-                    .iterations (int): The number of iterations to perform during
+                    .iterations (int): The number of iterations to perform during CEM
                         optimization.
                     .popsize (int): The number of candidate solutions to be sampled at
                         every iteration
@@ -146,14 +146,15 @@ class MPC:
             val_idxs_epoch = val_idxs[:, torch.randperm(val_size)]
 
             train_mse = torch.zeros((train_batches, self.num_nets))
-            train_xentropy = np.zeros((train_batches, self.num_nets))
+            train_xentropy = torch.zeros((train_batches, self.num_nets))
+            train_reg = torch.zeros(train_batches)
             val_mse = torch.zeros((val_batches, self.num_nets))
             val_xentropy = torch.zeros((val_batches, self.num_nets))
 
             for i in range(train_batches):
                 X, Y = dataset[train_idxs_epoch[:, i*batch_size:(i+1)*batch_size]]
                 X, Y = X.to(TORCH_DEVICE), Y.to(TORCH_DEVICE)
-                train_mse[i], train_xentropy[i] = self.model.update(X, Y)
+                train_mse[i], train_xentropy[i], train_reg[i] = self.model.update(X, Y)
 
             for i in range(val_batches):
                 X, Y = dataset[val_idxs_epoch[:, i*batch_size:(i+1)*batch_size]]
@@ -163,6 +164,7 @@ class MPC:
             # Record epoch train/val mse and cross-entropy averaged across models
             info_step = {"metrics": {"model/mse/train": train_mse.mean(),
                                      "model/xentropy/train": train_xentropy.mean(),
+                                     "model/regularization/train": train_reg.mean(),
                                      "model/mse/val": val_mse.mean(),
                                      "model/xentropy/val": val_xentropy.mean()},
                          "tensors": {"model/max_logvar": self.model.net[-1].max_logvar,

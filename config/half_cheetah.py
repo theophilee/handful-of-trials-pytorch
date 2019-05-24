@@ -39,13 +39,13 @@ class Config:
                           "init_rollouts": 5,
                           "total_rollouts": 300,
                           "train_freq": 1,
-                          "imaginary_rollouts": 30})
+                          "imaginary_rollouts": 5})
 
         model_cfg = DotMap({"ensemble_size": 5,
                             "in_features": self.obs_features_preprocessed + self.act_features,
                             "out_features": self.obs_features,
                             "hid_features": [200, 200, 200, 200],
-                            "activation": "tanh",
+                            "activation": "swish",
                             "lr": 1e-3,
                             "weight_decay": 1e-4})
 
@@ -67,7 +67,7 @@ class Config:
         policy_cfg = DotMap({"env": self.env,
                              "obs_features": self.obs_features_preprocessed,
                              "hid_features": [400, 300],
-                             "activation": "relu",
+                             "activation": "tanh",
                              "batch_size": 250,
                              "lr": 1e-3,
                              "weight_decay": 0.,

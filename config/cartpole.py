@@ -78,7 +78,7 @@ class Config:
         policy_cfg = DotMap({"env": self.env,
                              "obs_features": self.obs_features_preprocessed,
                              "hid_features": [400, 300],
-                             "activation": "relu",
+                             "activation": "tanh",
                              "batch_size": 32,
                              "lr": 1e-3,
                              "weight_decay": 0.,

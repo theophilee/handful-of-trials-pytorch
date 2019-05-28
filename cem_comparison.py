@@ -1,9 +1,12 @@
 import argparse
-import env # Register environments
 import numpy as np
 from multiprocessing import Pool
 from functools import partial
 import gym
+import os
+
+import env # Register environments
+from utils import Logger
 
 
 class ActionRepeat(object):
@@ -85,6 +88,8 @@ def nonparametric_cem(state, pool, action_space, horizon, proposals, topk, itera
 
 
 def main(args):
+    param_str = f'{args.algo}_hor={args.horizon}_prop={args.proposals}_iter={args.iterations}'
+
     env = gym.make(args.env)
     env = ActionRepeat(env, args.repeat)
 
@@ -104,6 +109,7 @@ def main(args):
     actions = np.zeros((args.episodes, env.num_steps) + env.action_space.shape)
 
     for i in range(args.episodes):
+        logger = Logger(os.path.join(args.logdir, f'{param_str}_run{i}'))
         observations[i, 0] = env.reset()
 
         for t in range(env.num_steps):
@@ -111,13 +117,15 @@ def main(args):
             actions[i, t] = planner(state)
             observations[i, t + 1], reward, _, _ = env.step(actions[i, t])
             scores[i] += reward
-            print(scores[i])
+            logger.log_scalar('reward', scores[i], t)
 
-        #print(scores[i])
+        print(scores[i])
 
-    print(f'{args.algo}, repeat={args.repeat}, horizon={args.horizon}, proposals={args.proposals}')
+    print(param_str)
     print('Mean score:         ', scores.mean())
     print('Standard deviation: ', scores.std())
+
+
 
 
 if __name__ == '__main__':
@@ -134,11 +142,12 @@ if __name__ == '__main__':
                         help='Length of each action sequence to consider.')
     parser.add_argument('-p', '--proposals', type=int, default=1000,
                         help='Number of action sequences to evaluate per iteration.')
-    parser.add_argument('-k', '--topk', type=int, default=40,
+    parser.add_argument('-k', '--topk', type=int, default=50,
                         help='Number of best action sequences to refit belief to.')
-    parser.add_argument('-i', '--iterations', type=int, default=10,
+    parser.add_argument('-i', '--iterations', type=int, default=5,
                         help='Number of optimization iterations for each action sequence.')
     parser.add_argument('--sigma', type=float, default=0.1,
                         help='standard deviation of noise for nonparametric version')
+    parser.add_argument('--logdir', type=str, default='runs/cem_comparison')
     args = parser.parse_args()
     main(args)

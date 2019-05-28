@@ -46,7 +46,7 @@ class Experiment:
         self.imaginary_rollouts = args.imaginary_rollouts
 
         self.env_str = env_str
-        self.savedir = os.path.join(savedir, f"{env_str}_{param_str}")
+        self.savedir = os.path.join(savedir, env_str, param_str)
         if not os.path.exists(self.savedir):
             os.makedirs(self.savedir)
 
@@ -144,6 +144,49 @@ class Experiment:
             obs, acts, score = self.mpc.sample_imaginary_rollouts(1, actor=self.policy)
             obs = obs.view([-1, obs.shape[-1]])
             labels = expert.act_parallel(obs)
+            metrics = self.policy.train(obs, labels, iterative=True)
+            print(f"Validation loss after training policy {metrics['policy/mse/val']}")
+
+            # Evaluate
+            obs_eval, acts_eval, score_eval = self._sample_rollout(actor=self.policy)
+
+            print(f"\nTraining iteration {i}")
+            print("Imaginary rollout statistics")
+            print_rollout_stats(obs, acts, score)
+            print("Evaluation statistics")
+            print_rollout_stats(obs_eval, acts_eval, score_eval)
+
+        torch.save(self.policy, os.path.join(self.savedir, 'policy_imitation.pth'))
+        """
+        for _ in range(20):
+            expert = torch.load(os.path.join(self.savedir, 'policy.pth'))
+            imitator = torch.load(os.path.join(self.savedir, 'policy_imitation.pth'))
+            obs_expert, acts_expert, score_expert = self._sample_rollout(actor=expert)
+            obs_imitation, acts_imitation, score_imitation = self._sample_rollout(actor=imitator)
+            print_rollout_stats(obs_expert, acts_expert, score_expert)
+            print_rollout_stats(obs_imitation, acts_imitation, score_imitation)
+            print()
+        """
+
+    def run_experiment_debug2(self):
+        """Train parameterized policy by imitation learning (DAgger) on trajectories
+        generated under the learned dynamics model, using pretrained dynamics model.
+        """
+        # Load pretrained model
+        path = '/home/theophile/Documents/research/handful-of-trials-pytorch/save/main/half_cheetah/5_swish_100_1/mpc.pth'
+        self.mpc = torch.load(path)
+
+        # Evaluate pretrained expert
+        obs_expert, acts_expert, score_expert = self._sample_rollout(actor=self.mpc)
+        print("Expert performance")
+        print_rollout_stats(obs_expert, acts_expert, score_expert)
+
+        # Train parameterized policy by imitating expert under learned model
+        for i in range(self.imaginary_rollouts):
+            # Train
+            obs, acts, score = self.mpc.sample_imaginary_rollouts(1, actor=self.policy)
+            obs = obs.view([-1, obs.shape[-1]])
+            labels = self.mpc.act_parallel(obs)
             metrics = self.policy.train(obs, labels, iterative=True)
             print(f"Validation loss after training policy {metrics['policy/mse/val']}")
 

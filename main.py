@@ -39,8 +39,8 @@ def main(args):
     #exp.run_behavior_cloning_debug()
     #exp.run_train_model_debug()
     #exp.run_experiment_debug()
-    exp.run_experiment_debug2()
-    #exp.run_mpc_baseline()
+    #exp.run_experiment_debug2()
+    exp.run_mpc_baseline()
     #exp.run_experiment()
 
 

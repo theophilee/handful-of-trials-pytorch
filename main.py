@@ -24,8 +24,9 @@ def main(args):
     cfg.mpc_cfg.model_cfg.ensemble_size = args.ensemble_size
     cfg.mpc_cfg.model_cfg.hid_features = args.hid_features
     cfg.mpc_cfg.opt_cfg.iterations = args.iterations
+    cfg.mpc_cfg.plan_hor = args.plan_hor
     cfg.exp_cfg.train_freq = args.train_freq
-    param_str = f'{args.ensemble_size}_{args.hid_features}_{args.iterations}_{args.train_freq}'
+    param_str = f'{args.ensemble_size}_{args.hid_features}_{args.iterations}_{args.plan_hor}_{args.train_freq}'
 
     # Model predictive control policy
     mpc = MPC(cfg.mpc_cfg)
@@ -60,6 +61,8 @@ if __name__ == "__main__":
                         help='Hidden layers of dynamics model.')
     parser.add_argument('--iterations', type=int, default=5,
                         help='Number of iterations to perform during CEM optimization.')
+    parser.add_argument('--plan_hor', type=int, default=25,
+                        help='CEM planning horizon.')
     parser.add_argument('--train_freq', type=int, default=1,
                         help='Number of episodes to wait for before retraining model.')
     parser.add_argument('--expert-demos', default=False, type=lambda x: (str(x).lower() == 'true'),

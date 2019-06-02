@@ -37,7 +37,7 @@ class Config:
         exp_cfg = DotMap({"env": self.env,
                           "expert_demos": False,
                           "init_rollouts": 5,
-                          "total_rollouts": 300,
+                          "total_rollouts": 150,
                           "train_freq": 1,
                           "imaginary_rollouts": 5})
 

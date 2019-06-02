@@ -58,7 +58,7 @@ if __name__ == "__main__":
     parser.add_argument('--hid_features', default=[200, 200, 200, 200],
                         type=lambda l: [int(x) for x in l.split(',')],
                         help='Hidden layers of dynamics model.')
-    parser.add_argument('--iterations', type=int, default=10, #TODO put back default=5 after debug
+    parser.add_argument('--iterations', type=int, default=5,
                         help='Number of iterations to perform during CEM optimization.')
     parser.add_argument('--train_freq', type=int, default=1,
                         help='Number of episodes to wait for before retraining model.')

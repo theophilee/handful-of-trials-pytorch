@@ -111,16 +111,24 @@ class Experiment:
     def run_train_model_debug(self):
         """Train dynamics model on saved expert demonstrations.
         """
-        #obs, acts, _ = self._sample_rollouts(self.init_rollouts, actor=self.mpc)
-        obs, acts = self._load_expert_demos()
+        obs, acts, _ = self._sample_rollouts(self.init_rollouts, actor=self.mpc)
+        obs_expert, acts_expert = self._load_expert_demos()
         #obs = np.concatenate((obs, obs_expert), axis=0)
         #acts = np.concatenate((acts, acts_expert), axis=0)
 
-        metrics, _ = self.mpc.train(obs, acts, iterative=False, debug_logger=self.logger)
+        #self.mpc.train(obs_expert, acts_expert, iterative=False, debug_logger=self.logger)
+        #torch.save(self.mpc, os.path.join(self.savedir, 'mpc.pth'))
+
+        metrics, _ = self.mpc.train(obs, acts, iterative=True)
         for k, v in metrics.items():
             print(f'{k}: {v}')
+            self.logger.log_scalar(k, v, self.init_rollouts)
 
-        torch.save(self.mpc, os.path.join(self.savedir, 'mpc.pth'))
+        for step, (obs, acts) in enumerate(zip(obs_expert, acts_expert)):
+            metrics, _ = self.mpc.train(obs, acts, iterative=True)
+            for k, v in metrics.items():
+                print(f'{k}: {v}')
+                self.logger.log_scalar(k, v, self.init_rollouts + step + 1)
 
     def run_experiment_debug(self):
         """Train parameterized policy by imitation learning (DAgger) on trajectories

@@ -31,10 +31,12 @@ class ActionRepeat(object):
         total_reward = 0
 
         for _ in range(self.amount):
-            obs, reward, _, _ = self._env.step(action)
+            obs, reward, done, _ = self._env.step(action)
             total_reward += reward
+            if done:
+                break
 
-        return obs, total_reward, False, {}
+        return obs, total_reward, done, {}
 
     def reset(self, *args, **kwargs):
         return self._env.reset(*args, **kwargs)
@@ -51,8 +53,11 @@ def evaluate(actions, state):
 
     score = 0
     for action in actions:
-        _, reward, _, _ = global_env.step(action)
+        _, reward, done, _ = global_env.step(action)
         score += reward
+        if done:
+            break
+
     return score
 
 
@@ -88,7 +93,7 @@ def nonparametric_cem(state, pool, action_space, horizon, proposals, topk, itera
 
 
 def main(args):
-    param_str = f'{args.algo}_hor={args.horizon}_prop={args.proposals}_iter={args.iterations}'
+    param_str = f'{args.env}_{args.algo}_hor={args.horizon}_prop={args.proposals}_iter={args.iterations}_sigma={args.sigma}'
 
     env = gym.make(args.env)
     env = ActionRepeat(env, args.repeat)
@@ -124,8 +129,6 @@ def main(args):
     print(param_str)
     print('Mean score:         ', scores.mean())
     print('Standard deviation: ', scores.std())
-
-
 
 
 if __name__ == '__main__':

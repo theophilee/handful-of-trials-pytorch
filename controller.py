@@ -135,7 +135,7 @@ class MPC:
         train_batches = int(train_split * self.batches_per_epoch)
         val_batches = self.batches_per_epoch - train_batches
 
-        early_stopping = EarlyStopping(patience=15)
+        early_stopping = EarlyStopping(patience=20)
         start = time.time()
 
         # Training loop
@@ -183,6 +183,7 @@ class MPC:
         info_best = early_stopping.load_best(self.model.net)
         metrics.update(info_best["metrics"])
         metrics["model/train_time"] = time.time() - start
+        metrics["model/train_epochs"] = epoch - early_stopping.patience
 
         return metrics, info_best["tensors"]
 

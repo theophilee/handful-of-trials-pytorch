@@ -125,9 +125,9 @@ if __name__ == '__main__':
         'MyHalfCheetah-v2': 15000
         
     Current best:
-        'MyCartpole-v0' {'horizon': 12, 'repeat': 4, 'topk': 50} -> 178 (std = 3 for 10 runs)
         'MySwimmer-v2' {'horizon': 17, 'repeat': 4, 'topk': 30} -> 312
         'MyHalfCheetah-v2' {'horizon': 11, 'repeat': 4, 'topk': 40} -> 13907 (std 1541 for 20 runs)
+        'MyHalfCheetah-v2' {'horizon': whatever, 'repeat': 1, 'topk': whatever} -> >20000
         
     MySwimmer-v2
     space = {'repeat': hp.quniform('repeat', 2, 8, 1),

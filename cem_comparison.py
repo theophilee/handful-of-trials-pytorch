@@ -93,7 +93,8 @@ def nonparametric_cem(state, pool, action_space, horizon, proposals, topk, itera
 
 
 def main(args):
-    param_str = f'{args.env}_{args.algo}_hor={args.horizon}_prop={args.proposals}_iter={args.iterations}_sigma={args.sigma}'
+    param_str = (f'{args.env}_{args.algo}_rep={args.repeat}_hor={args.horizon}_prop={args.proposals}_iter={args.iterations}'
+                 f'_sigma={args.sigma}')
 
     env = gym.make(args.env)
     env = ActionRepeat(env, args.repeat)

@@ -82,7 +82,7 @@ class Experiment:
             self.logger.log_scalar("rollout/avg_time", (time.time() - start) / self.train_freq, step)
 
             # Train model
-            reset_model = (step % 5 == 0) # TODO make this a parameter if works?
+            reset_model = (step % 25 == 0)
             metrics, tensors = self.mpc.train(obs, acts, iterative=True, reset_model=reset_model)
             for k, v in metrics.items():
                 self.logger.log_scalar(k, v, step)

@@ -93,9 +93,6 @@ class MPC:
         """
         self.has_been_trained = True
 
-        if reset_model:
-            self.model = self.reset_model()
-
         # Preprocess new data
         assert (obs.ndim in [2, 3]) and obs.ndim == acts.ndim
         if obs.ndim == 2:
@@ -113,15 +110,18 @@ class MPC:
         else:
             self.X, self.Y = X_new, Y_new
 
-        # Store input statistics for normalization
-        self.model.fit_input_stats(self.X)
-
         # Record mse and cross-entropy on new test data
         metrics = {}
-        if iterative:
+        if iterative and hasattr(self.model, 'input_mean'):
             mse, xentropy = self.model.evaluate(X_new.to(TORCH_DEVICE), Y_new.to(TORCH_DEVICE))
             metrics["model/mse/test"], metrics["model/xentropy/test"] = mse.mean(), xentropy.mean()
 
+        if reset_model:
+            self.model = self.reset_model()
+
+        # Store input statistics for normalization
+        self.model.fit_input_stats(self.X)
+        
         dataset = TensorDataset(self.X, self.Y)
         train_size = int(train_split * len(dataset))
         val_size = len(dataset) - train_size

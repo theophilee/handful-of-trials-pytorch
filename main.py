@@ -45,7 +45,7 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env', type=str, default='swimmer',
+    parser.add_argument('--env', type=str, default='half_cheetah',
                         help='Env name: one of {}.'.format(ALLOWED_ENVS))
     parser.add_argument('--logdir', type=str, default='runs/main',
                         help='Log directory for Tensorboard.')

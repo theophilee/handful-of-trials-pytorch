@@ -53,7 +53,7 @@ if __name__ == "__main__":
                         help='Save directory.')
     parser.add_argument('--seed', type=int, default=0,
                         help='Random seed.')
-    parser.add_argument('--ensemble-size', type=int, default=5,
+    parser.add_argument('--ensemble_size', type=int, default=5,
                         help='Number of bootstrap ensemble dynamics models.')
     parser.add_argument('--hid_features', default=[200, 200, 200, 200],
                         type=lambda l: [int(x) for x in l.split(',')],
@@ -62,7 +62,7 @@ if __name__ == "__main__":
                         help='Number of iterations to perform during CEM optimization.')
     parser.add_argument('--train_freq', type=int, default=1,
                         help='Number of episodes to wait for before retraining model.')
-    parser.add_argument('--expert-demos', default=False, type=lambda x: (str(x).lower() == 'true'),
+    parser.add_argument('--expert_demos', default=False, type=lambda x: (str(x).lower() == 'true'),
                         help='If True, add expert demonstrations to dynamics model training set.')
     args = parser.parse_args()
 

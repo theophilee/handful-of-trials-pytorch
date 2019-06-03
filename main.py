@@ -24,8 +24,9 @@ def main(args):
     cfg.mpc_cfg.model_cfg.ensemble_size = args.ensemble_size
     cfg.mpc_cfg.model_cfg.hid_features = args.hid_features
     cfg.mpc_cfg.opt_cfg.iterations = args.iterations
+    cfg.mpc_cfg.num_part = args.num_part
     cfg.exp_cfg.train_freq = args.train_freq
-    param_str = f'{args.ensemble_size}_{args.hid_features}_{args.iterations}_{args.train_freq}'
+    param_str = f'nets={args.ensemble_size}_hid={args.hid_features}_iter={args.iterations}_part={args.num_part}_freq={args.train_freq}'
 
     # Model predictive control policy
     mpc = MPC(cfg.mpc_cfg)
@@ -55,6 +56,8 @@ if __name__ == "__main__":
                         help='Random seed.')
     parser.add_argument('--ensemble_size', type=int, default=5,
                         help='Number of bootstrap ensemble dynamics models.')
+    parser.add_argument('--num_part', type=int, default=20,
+                        help='Number of particles to evaluate each plan with CEM planner.')
     parser.add_argument('--hid_features', default=[200, 200, 200, 200],
                         type=lambda l: [int(x) for x in l.split(',')],
                         help='Hidden layers of dynamics model.')

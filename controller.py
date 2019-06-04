@@ -284,7 +284,8 @@ class MPC:
             obs, plans = obs.to(TORCH_DEVICE), plans.to(TORCH_DEVICE)
             for t in range(self.plan_hor):
                 acts = plans[:, t]
-                next_obs = self._predict_next_obs_divide(obs, acts)
+                #next_obs = self._predict_next_obs_divide(obs, acts) # TODO uncomment this
+                next_obs = self._predict_next_obs_average(obs, acts)
                 scores[i * batch_size:(i+1) * batch_size] += self.get_reward(obs, acts, next_obs)
                 obs = next_obs
 

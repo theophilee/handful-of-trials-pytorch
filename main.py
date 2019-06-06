@@ -25,7 +25,7 @@ def main(args):
     cfg.mpc_cfg.model_cfg.hid_features = args.hid_features
     cfg.mpc_cfg.opt_cfg.iterations = args.iterations
     cfg.mpc_cfg.num_part = args.num_part
-    param_str = f'nets={args.ensemble_size}_hid={args.hid_features}_iter={args.iterations}_part={args.num_part}'
+    param_str = f'env={args.env}_nets={args.ensemble_size}_hid={args.hid_features}_iter={args.iterations}_part={args.num_part}'
 
     # Model predictive control policy
     mpc = MPC(cfg.mpc_cfg)

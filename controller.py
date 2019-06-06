@@ -78,13 +78,12 @@ class MPC:
     def _reset_model(self, model_cfg):
         return BootstrapEnsemble(**model_cfg)
 
-    def train(self, obs, acts, train_split=0.8, iterative=True, reset_model=False,
-              debug_logger=None):
+    def train(self, obs, acts, train_split=0.8, iterative=True, reset_model=False, debug_logger=None):
         """ Train bootstrap ensemble model.
 
         Arguments:
-            obs (2D or 3D np.ndarray): observations
-            acts (2D or 3D np.ndarray): actions
+            obs (list[2D np.ndarray]): observations
+            acts (list[2D np.ndarray]): actions
             train_split (float): proportion of data used for training
             iterative (bool): if True, add new data to training set otherwise
                 start training set from scratch
@@ -94,14 +93,9 @@ class MPC:
         self.has_been_trained = True
 
         # Preprocess new data
-        assert (obs.ndim in [2, 3]) and obs.ndim == acts.ndim
-        if obs.ndim == 2:
-            X_new = np.concatenate([self.obs_preproc(obs[:-1]), acts], axis=1)
-            Y_new = self.targ_proc(obs[:-1], obs[1:])
-        elif obs.ndim == 3:
-            X_new = [np.concatenate([self.obs_preproc(o[:-1]), a], axis=1) for o, a in zip(obs, acts)]
-            Y_new = [self.targ_proc(o[:-1], o[1:]) for o in obs]
-            X_new, Y_new = np.concatenate(X_new, axis=0), np.concatenate(Y_new, axis=0)
+        X_new = [np.concatenate([self.obs_preproc(o[:-1]), a], axis=1) for o, a in zip(obs, acts)]
+        Y_new = [self.targ_proc(o[:-1], o[1:]) for o in obs]
+        X_new, Y_new = np.concatenate(X_new, axis=0), np.concatenate(Y_new, axis=0)
         X_new, Y_new = torch.from_numpy(X_new).float(), torch.from_numpy(Y_new).float()
 
         # Add new data to training set
@@ -228,6 +222,7 @@ class MPC:
             avg_score (float): Average score.
         """
         # TODO split predictions among models in ensemble instead of averaging?
+        # TODO deal with done flag
         # We use the environment only for its start state distribution
         observations = [torch.tensor([self.env.reset() for _ in range(num)]).float()]
         actions, scores = [], torch.zeros(num).to(TORCH_DEVICE)
@@ -276,6 +271,7 @@ class MPC:
         dataset = TensorDataset(obs, plans)
         num_batches = math.ceil(len(dataset) / batch_size)
         scores = torch.zeros(num_obs * num_plans * self.num_part).to(TORCH_DEVICE)
+        alives = torch.ones(num_obs * num_plans * self.num_part).to(TORCH_DEVICE)
 
         # Compute scores in parallel
         # Across starting observations, plans per observation and particles per plan
@@ -284,9 +280,10 @@ class MPC:
             obs, plans = obs.to(TORCH_DEVICE), plans.to(TORCH_DEVICE)
             for t in range(self.plan_hor):
                 acts = plans[:, t]
-                #next_obs = self._predict_next_obs_divide(obs, acts) # TODO uncomment this
-                next_obs = self._predict_next_obs_average(obs, acts)
-                scores[i * batch_size:(i+1) * batch_size] += self.get_reward(obs, acts, next_obs)
+                next_obs = self._predict_next_obs_divide(obs, acts)
+                rewards, dones = self.get_reward(obs, acts, next_obs)
+                alives = torch.min(alives, 1 - dones)
+                scores[i * batch_size:(i+1) * batch_size] += alives * rewards
                 obs = next_obs
 
         # Average score over particles

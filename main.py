@@ -9,7 +9,7 @@ from config import get_config
 from utils import *
 
 
-ALLOWED_ENVS = ["cartpole", "half_cheetah", "swimmer", "pusher"]
+ALLOWED_ENVS = ["ant", "cartpole", "half_cheetah", "humanoid", "inverted_pendulum", "pusher", "swimmer", "walker2d"]
 
 
 def main(args):
@@ -25,8 +25,7 @@ def main(args):
     cfg.mpc_cfg.model_cfg.hid_features = args.hid_features
     cfg.mpc_cfg.opt_cfg.iterations = args.iterations
     cfg.mpc_cfg.num_part = args.num_part
-    cfg.exp_cfg.train_freq = args.train_freq
-    param_str = f'nets={args.ensemble_size}_hid={args.hid_features}_iter={args.iterations}_part={args.num_part}_freq={args.train_freq}'
+    param_str = f'nets={args.ensemble_size}_hid={args.hid_features}_iter={args.iterations}_part={args.num_part}'
 
     # Model predictive control policy
     mpc = MPC(cfg.mpc_cfg)
@@ -63,8 +62,6 @@ if __name__ == "__main__":
                         help='Hidden layers of dynamics model.')
     parser.add_argument('--iterations', type=int, default=5,
                         help='Number of iterations to perform during CEM optimization.')
-    parser.add_argument('--train_freq', type=int, default=1,
-                        help='Number of episodes to wait for before retraining model.')
     parser.add_argument('--expert_demos', default=False, type=lambda x: (str(x).lower() == 'true'),
                         help='If True, add expert demonstrations to dynamics model training set.')
     args = parser.parse_args()

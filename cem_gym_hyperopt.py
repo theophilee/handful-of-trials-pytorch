@@ -1,10 +1,11 @@
-import env # Register environments
 import numpy as np
 from multiprocessing import Pool
 from functools import partial
 from hyperopt import fmin, tpe, hp, Trials, STATUS_OK
 import pickle
 import gym
+
+import env # Register environments
 
 
 ENV = 'MySwimmer-v2'
@@ -32,10 +33,12 @@ class ActionRepeat(object):
         total_reward = 0
 
         for _ in range(self.amount):
-            obs, reward, _, _ = self._env.step(action)
+            obs, reward, done, _ = self._env.step(action)
             total_reward += reward
+            if done:
+                break
 
-        return obs, total_reward, False, {}
+        return obs, total_reward, done, {}
 
     def reset(self, *args, **kwargs):
         return self._env.reset(*args, **kwargs)
@@ -118,27 +121,6 @@ def run_trials(space, objective, init, step, filename):
 
 
 if __name__ == '__main__':
-    """
-    Objective:
-        'MyCartpole-v0': 178
-        'MySwimmer-v2': 360
-        'MyHalfCheetah-v2': 15000
-        
-    Current best:
-        'MySwimmer-v2' {'horizon': 17, 'repeat': 4, 'topk': 30} -> 312
-        'MyHalfCheetah-v2' {'horizon': 11, 'repeat': 4, 'topk': 40} -> 13907 (std 1541 for 20 runs)
-        'MyHalfCheetah-v2' {'horizon': whatever, 'repeat': 1, 'topk': whatever} -> >20000
-        
-    MySwimmer-v2
-    space = {'repeat': hp.quniform('repeat', 2, 8, 1),
-             'horizon': hp.quniform('horizon', 10, 25, 1),
-             'topk': hp.quniform('topk', 10, 90, 10)}
-             
-    MyHalfCheetah-v2
-    space = {'repeat': hp.quniform('repeat', 2, 5, 1),
-             'horizon': hp.quniform('horizon', 10, 20, 1),
-             'topk': hp.quniform('topk', 20, 80, 10)}
-    """
     space = {'repeat': hp.quniform('repeat', 2, 5, 1),
              'horizon': hp.quniform('horizon', 10, 20, 1),
              'topk': hp.quniform('topk', 20, 80, 10)}

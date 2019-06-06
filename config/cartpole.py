@@ -38,7 +38,9 @@ class Config:
         ee_pos = -ee_pos.sum(dim=1)
         reward_obs = (ee_pos / (0.6 ** 2)).exp()
         reward_act = -0.01 * (act ** 2).sum(dim=1)
-        return reward_obs + reward_act
+        reward = reward_obs + reward_act
+        done = torch.zeros_like(reward)
+        return reward, done
 
     def get_ee_pos(self, obs):
         x0, theta = obs[:, :1], obs[:, 1:2]
@@ -47,10 +49,10 @@ class Config:
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,
                           "expert_demos": False,
-                          "init_rollouts": 1,
-                          "total_rollouts": 15,
-                          "train_freq": 1,
-                          "imaginary_rollouts": 30})
+                          "init_steps": 200,
+                          "total_steps": 3000,
+                          "train_freq": 200,
+                          "imaginary_steps": 1000})
 
         model_cfg = DotMap({"ensemble_size": 5,
                             "in_features": self.obs_features_preprocessed + self.act_features,

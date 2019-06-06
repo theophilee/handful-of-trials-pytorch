@@ -8,19 +8,16 @@ from .action_repeat import ActionRepeat
 
 class Config:
     def __init__(self):
-        env = gym.make("MyHalfCheetah-v2")
+        env = gym.make("MyAnt-v2")
         action_repeat = 1
         self.env = ActionRepeat(env, action_repeat)
 
         self.obs_features = self.env.observation_space.shape[0]
-        self.obs_features_preprocessed = self.obs_features
+        self.obs_features_preprocessed = self.obs_features - 2
         self.act_features = self.env.action_space.shape[0]
 
     def obs_preproc(self, obs):
-        if isinstance(obs, np.ndarray):
-            return np.concatenate([obs[:, 1:2], np.sin(obs[:, 2:3]), np.cos(obs[:, 2:3]), obs[:, 3:]], axis=1)
-        else:
-            return torch.cat([obs[:, 1:2], obs[:, 2:3].sin(), obs[:, 2:3].cos(), obs[:, 3:]], dim=1)
+        return obs[:, 2:]
 
     def pred_postproc(self, obs, pred):
         return obs + pred
@@ -30,16 +27,18 @@ class Config:
 
     def get_reward(self, obs, act, next_obs):
         reward_run = (next_obs[:, 0] - obs[:, 0]) / self.env.dt
-        reward_act = -0.1 * (act ** 2).sum(dim=1)
-        reward = reward_act + reward_run
-        done = torch.zeros_like(reward)
+        reward_act = -0.5 * (act ** 2).sum(dim=1)
+        reward_contact = -0.5e-3 * (next_obs[:, -14 * 6:] ** 2).sum(dim=1)
+        reward_alive = 1.0
+        reward = reward_run + reward_act + reward_contact + reward_alive
+        done = torch.max(next_obs[:, 2] < 0.2, next_obs[:, 2] > 1.0).float()
         return reward, done
 
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,
                           "expert_demos": False,
                           "init_steps": 5000,
-                          "total_steps": 100000,
+                          "total_steps": 1000000,
                           "train_freq": 1000,
                           "imaginary_steps": 5000})
 

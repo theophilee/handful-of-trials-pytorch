@@ -31,10 +31,10 @@ class Config:
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,
                           "expert_demos": False,
-                          "init_rollouts": 5,
-                          "total_rollouts": 100,
-                          "train_freq": 1,
-                          "imaginary_rollouts": 30})
+                          "init_steps": 5000,
+                          "total_steps": 100000,
+                          "train_freq": 1000,
+                          "imaginary_steps": 5000})
 
         model_cfg = DotMap({"ensemble_size": 5,
                             "in_features": self.obs_features_preprocessed + self.act_features,

@@ -1,7 +1,7 @@
 """
-CEM planning on dm_control tasks using the ground truth dynamics.
+MPC CEM planning on dm_control tasks using the ground truth dynamics.
 Example usage:
-python mpc_dm_control_true_dynamics.py cheetah run -r 4 -l 12
+python cem_dm.py cheetah run -r 4 -l 12
 """
 import argparse
 from dm_control import rl
@@ -9,7 +9,6 @@ from dm_control import suite
 import numpy as np
 from multiprocessing import Pool
 from functools import partial
-import scipy.stats
 
 
 class ActionRepeat(object):
@@ -68,14 +67,7 @@ def cem_planner(pool, action_spec, state, horizon, proposals, topk, iterations, 
     std = np.ones((horizon,) + action_spec.shape) * action_bound
 
     for _ in range(iterations):
-        if distribution == 'norm':
-            plans = np.random.normal(mean, std, size=(proposals,) + mean.shape)
-        if distribution == 'truncnorm':
-            # Truncated normal to keep actions in range -> bad idea
-            dist =  scipy.stats.truncnorm(
-                (-action_bound - mean) / std, (action_bound - mean) / std, mean, std)
-            plans = dist.rvs(size=(proposals,) + mean.shape)
-
+        plans = np.random.normal(mean, std, size=(proposals,) + mean.shape)
         scores = pool.map(partial(evaluate, state=state), plans)
         plans = plans[np.argsort(scores)]
         mean, std = plans[-topk:].mean(axis=0), plans[-topk:].std(axis=0)
@@ -127,9 +119,5 @@ if __name__ == '__main__':
                         help='Number of best action sequences to refit belief to.')
     parser.add_argument('-i', '--iterations', type=int, default=10,
                         help='Number of optimization iterations for each action sequence.')
-    parser.add_argument('--distribution', type=str, default='norm',
-                        help='Distribution to refit, one of "norm", "truncnorm".')
-    parser.add_argument('--logdir', type=str, default='runs/mpc_dm_control_true_dynamics',
-                        help='Log directory for tensorboard.')
     args = parser.parse_args()
     main(args)

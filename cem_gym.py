@@ -1,3 +1,8 @@
+"""
+MPC CEM planning on gym environments using the ground truth dynamics.
+Example usage:
+python cem_gym.py MyHalfCheetah-v2 -a gaussian -r 4 -l 12
+"""
 import argparse
 import numpy as np
 from multiprocessing import Pool
@@ -93,8 +98,8 @@ def nonparametric_cem(state, pool, action_space, horizon, proposals, topk, itera
 
 
 def main(args):
-    param_str = (f'{args.env}_{args.algo}_rep={args.repeat}_hor={args.horizon}_prop={args.proposals}_iter={args.iterations}'
-                 f'_sigma={args.sigma}')
+    param_str = (f'{args.env}_{args.algo}_rep={args.repeat}_hor={args.horizon}_prop={args.proposals}'
+                 f'_iter={args.iterations}_sigma={args.sigma}')
 
     env = gym.make(args.env)
     env = ActionRepeat(env, args.repeat)
@@ -131,12 +136,19 @@ def main(args):
     print('Mean score:         ', scores.mean())
     print('Standard deviation: ', scores.std())
 
+    if args.save:
+        path = os.path.join(args.savedir, args.env)
+        if not os.path.exists(path):
+            os.makedirs(path)
+        np.save(os.path.join(path, 'obs'), observations)
+        np.save(os.path.join(path, 'act'), actions)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('env',
                         help='OpenAI gym environment to load.')
-    parser.add_argument('algo',
+    parser.add_argument('-a', '--algo', type=str, default='gaussian',
                         help='CEM algorithm to use, one of "gaussian" or "nonparametric"')
     parser.add_argument('-r', '--repeat', type=int, default=1,
                         help='Number of times to repeat each action for.')
@@ -151,7 +163,12 @@ if __name__ == '__main__':
     parser.add_argument('-i', '--iterations', type=int, default=5,
                         help='Number of optimization iterations for each action sequence.')
     parser.add_argument('--sigma', type=float, default=0.1,
-                        help='standard deviation of noise for nonparametric version')
-    parser.add_argument('--logdir', type=str, default='runs/cem_comparison')
+                        help='Standard deviation of noise for nonparametric version.')
+    parser.add_argument('--logdir', type=str, default='runs/cem_comparison',
+                        help='Tensorboard log directory.')
+    parser.add_argument('--save', action='store_true',
+                        help='If True, save observations and actions.')
+    parser.add_argument('--savedir', type=str, default='save/expert_demonstrations',
+                        help='Save directory if save is True.')
     args = parser.parse_args()
     main(args)

@@ -1,14 +1,13 @@
 import gym
-from dotmap import DotMap
-import numpy as np
 import torch
+from dotmap import DotMap
 
 from .action_repeat import ActionRepeat
 
 
 class Config:
     def __init__(self):
-        env = gym.make("MyHalfCheetah-v2")
+        env = gym.make("MyInvertedPendulum-v2")
         action_repeat = 1
         self.env = ActionRepeat(env, action_repeat)
 
@@ -17,10 +16,7 @@ class Config:
         self.act_features = self.env.action_space.shape[0]
 
     def obs_preproc(self, obs):
-        if isinstance(obs, np.ndarray):
-            return np.concatenate([obs[:, 1:2], np.sin(obs[:, 2:3]), np.cos(obs[:, 2:3]), obs[:, 3:]], axis=1)
-        else:
-            return torch.cat([obs[:, 1:2], obs[:, 2:3].sin(), obs[:, 2:3].cos(), obs[:, 3:]], dim=1)
+        return obs
 
     def pred_postproc(self, obs, pred):
         return obs + pred
@@ -29,17 +25,15 @@ class Config:
         return next_obs - obs
 
     def get_reward(self, obs, act, next_obs):
-        reward_run = (next_obs[:, 0] - obs[:, 0]) / self.env.dt
-        reward_act = -0.1 * (act ** 2).sum(dim=1)
-        reward = reward_act + reward_run
-        done = torch.zeros_like(reward)
+        reward = torch.ones(obs.shape[0]).to(obs.device)
+        done = (torch.abs(next_obs[:, 1]) > 0.2).float()
         return reward, done
 
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,
                           "expert_demos": False,
                           "init_steps": 5000,
-                          "total_steps": 100000,
+                          "total_steps": 1000000,
                           "train_freq": 1000,
                           "imaginary_steps": 5000})
 
@@ -56,7 +50,7 @@ class Config:
                           "num_elites": 50})
 
         mpc_cfg = DotMap({"env": self.env,
-                          "plan_hor": 20,
+                          "plan_hor": 25,
                           "num_part": 20,
                           "batches_per_epoch": 100,
                           "obs_preproc": self.obs_preproc,
@@ -73,7 +67,7 @@ class Config:
                              "batch_size": 250,
                              "lr": 1e-3,
                              "weight_decay": 0.,
-                             "obs_preproc":self.obs_preproc})
+                             "obs_preproc": self.obs_preproc})
 
         cfg = DotMap({"exp_cfg": exp_cfg,
                       "mpc_cfg": mpc_cfg,

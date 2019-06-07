@@ -5,6 +5,7 @@ from controller import MPC
 from policy import Policy
 from experiment import Experiment
 from config import get_config
+from config.action_repeat import ActionRepeat
 
 from utils import *
 
@@ -21,10 +22,12 @@ def main(args):
     cfg = get_config(args.env)
 
     # Overwrite configuration with command line arguments
+    cfg.exp_cfg.env = ActionRepeat(cfg.exp_cfg.env._env, args.action_repeat)
     cfg.mpc_cfg.model_cfg.ensemble_size = args.ensemble_size
     cfg.mpc_cfg.model_cfg.hid_features = args.hid_features
     cfg.mpc_cfg.opt_cfg.iterations = args.iterations
     cfg.mpc_cfg.num_part = args.num_part
+    cfg.mpc_cfg.plan_hor = args.plan_hor
     param_str = f'env={args.env}_nets={args.ensemble_size}_hid={args.hid_features}_iter={args.iterations}_part={args.num_part}'
 
     # Model predictive control policy
@@ -35,17 +38,12 @@ def main(args):
 
     # Run experiment
     exp = Experiment(mpc, policy, args.env, param_str, args.logdir, args.savedir, cfg.exp_cfg)
-    #exp.run_behavior_cloning_debug()
-    #exp.run_train_model_debug()
-    #exp.run_experiment_debug()
-    #exp.run_experiment_debug2()
     exp.run_mpc_baseline()
-    #exp.run_experiment()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env', type=str, default='half_cheetah',
+    parser.add_argument('--env', type=str, default='walker2d',
                         help='Env name: one of {}.'.format(ALLOWED_ENVS))
     parser.add_argument('--logdir', type=str, default='runs/main',
                         help='Log directory for Tensorboard.')
@@ -53,10 +51,14 @@ if __name__ == "__main__":
                         help='Save directory.')
     parser.add_argument('--seed', type=int, default=0,
                         help='Random seed.')
+    parser.add_argument('--action_repeat', type=int, default=1,
+                        help='Action repeat.')
     parser.add_argument('--ensemble_size', type=int, default=5,
                         help='Number of bootstrap ensemble dynamics models.')
     parser.add_argument('--num_part', type=int, default=20,
                         help='Number of particles to evaluate each plan with CEM planner.')
+    parser.add_argument('--plan_hor', type=int, default=25,
+                        help='Planning horizon for CEM.')
     parser.add_argument('--hid_features', default=[200, 200, 200, 200],
                         type=lambda l: [int(x) for x in l.split(',')],
                         help='Hidden layers of dynamics model.')

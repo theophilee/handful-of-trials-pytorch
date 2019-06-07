@@ -28,7 +28,7 @@ def main(args):
     cfg.mpc_cfg.opt_cfg.iterations = args.iterations
     cfg.mpc_cfg.num_part = args.num_part
     cfg.mpc_cfg.plan_hor = args.plan_hor
-    param_str = (f'repeat={args.action_repeat}_nets={args.ensemble_size}'
+    param_str = (f'repeat={args.action_repeat}_nets={args.ensemble_size}_hor={args.plan_hor}'
                  f'_hid={args.hid_features}_iter={args.iterations}_part={args.num_part}')
 
     # Model predictive control policy

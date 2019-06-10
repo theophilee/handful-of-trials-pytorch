@@ -22,14 +22,14 @@ def main(args):
     cfg = get_config(args.env)
 
     # Overwrite configuration with command line arguments
-    cfg.exp_cfg.env = ActionRepeat(cfg.exp_cfg.env._env, args.action_repeat)
+    #cfg.exp_cfg.env = ActionRepeat(cfg.exp_cfg.env._env, args.action_repeat)
     cfg.mpc_cfg.model_cfg.ensemble_size = args.ensemble_size
     cfg.mpc_cfg.model_cfg.hid_features = args.hid_features
     cfg.mpc_cfg.opt_cfg.iterations = args.iterations
     cfg.mpc_cfg.num_part = args.num_part
     cfg.mpc_cfg.plan_hor = args.plan_hor
-    param_str = (f'repeat={args.action_repeat}_nets={args.ensemble_size}_hor={args.plan_hor}'
-                 f'_hid={args.hid_features}_iter={args.iterations}_part={args.num_part}')
+    param_str = (f'nets={args.ensemble_size}_hid={args.hid_features}_iter={args.iterations}'
+                 f'_part={args.num_part}_hor={args.plan_hor}')
 
     # Model predictive control policy
     mpc = MPC(cfg.mpc_cfg)
@@ -52,8 +52,8 @@ if __name__ == "__main__":
                         help='Save directory.')
     parser.add_argument('--seed', type=int, default=0,
                         help='Random seed.')
-    parser.add_argument('--action_repeat', type=int, default=1,
-                        help='Action repeat.')
+    #parser.add_argument('--action_repeat', type=int, default=1,
+    #                    help='Action repeat.')
     parser.add_argument('--ensemble_size', type=int, default=5,
                         help='Number of bootstrap ensemble dynamics models.')
     parser.add_argument('--num_part', type=int, default=20,

@@ -30,7 +30,7 @@ class Config:
 
     def get_reward(self, obs, act, next_obs):
         reward_run = (next_obs[:, 0] - obs[:, 0]) / self.env.dt
-        reward_act = -0.1 * (act ** 2).sum(dim=1)
+        reward_act = -0.1 * (act ** 2).sum(dim=1) * self.env.amount
         reward = reward_act + reward_run
         done = torch.zeros_like(reward)
         return reward, done

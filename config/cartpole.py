@@ -36,8 +36,8 @@ class Config:
         ee_pos -= self.ee_sub
         ee_pos = ee_pos ** 2
         ee_pos = -ee_pos.sum(dim=1)
-        reward_obs = (ee_pos / (0.6 ** 2)).exp()
-        reward_act = -0.01 * (act ** 2).sum(dim=1)
+        reward_obs = (ee_pos / (0.6 ** 2)).exp() * self.env.amount
+        reward_act = -0.01 * (act ** 2).sum(dim=1) * self.env.amount
         reward = reward_obs + reward_act
         done = torch.zeros_like(reward)
         return reward, done

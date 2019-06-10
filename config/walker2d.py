@@ -25,8 +25,8 @@ class Config:
 
     def get_reward(self, obs, act, next_obs):
         reward_run = (next_obs[:, 0] - obs[:, 0]) / self.env.dt
-        reward_act = -1e-3 * (act ** 2).sum(dim=1)
-        reward_alive = 1.0
+        reward_act = -1e-3 * (act ** 2).sum(dim=1) * self.env.amount
+        reward_alive = 1.0 * self.env.amount
         reward = reward_run + reward_act + reward_alive
         height, ang = next_obs[:, 1], next_obs[:, 2]
         done = (1 - (height > 0.8) * (height < 2.0) * (ang > -1.0) * (ang < 1.0)).float()

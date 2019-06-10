@@ -1,6 +1,5 @@
 import gym
 from dotmap import DotMap
-import numpy as np
 import torch
 
 from .action_repeat import ActionRepeat
@@ -30,12 +29,12 @@ class Config:
         return ((mass * xpos).sum(dim=1) / mass.sum(dim=(1, 2)).view(-1, 1))[:, 0]
 
     def get_reward(self, obs, act, next_obs):
-        reward_run = (self._mass_center(next_obs) - self._mass_center(obs)) / self.env.dt
-        reward_act = -0.1 * (act ** 2).sum(dim=1)
-        reward_contact = max(-0.5e-6 * (next_obs[:, -14 * 6:] ** 2).sum(), -10)
-        reward_alive = 5.0
+        reward_run = 1.25 * (self._mass_center(next_obs) - self._mass_center(obs)) / self.env.dt
+        reward_act = -0.1 * (act ** 2).sum(dim=1) * self.env.amount
+        reward_contact = max(-0.5e-6 * (next_obs[:, -14 * 6:] ** 2).sum(), -10) * self.env.amount
+        reward_alive = 5.0 * self.env.amount
         reward = reward_run + reward_act + reward_contact + reward_alive
-        done = torch.max(next_obs[:, 14 * 4 + 2] < 1.0, next_obs[:, 14 * 4 + 2] > 2.0).float()
+        done = torch.max(next_obs[:, 14 * 4] < 1.0, next_obs[:, 14 * 4] > 2.0).float()
         return reward, done
 
     def get_config(self):

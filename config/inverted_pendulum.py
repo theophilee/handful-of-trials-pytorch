@@ -25,7 +25,7 @@ class Config:
         return next_obs - obs
 
     def get_reward(self, obs, act, next_obs):
-        reward = torch.ones(obs.shape[0]).to(obs.device)
+        reward = torch.ones(obs.shape[0]).to(obs.device) * self.env.amount
         done = (torch.abs(next_obs[:, 1]) > 0.2).float()
         return reward, done
 

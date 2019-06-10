@@ -164,7 +164,7 @@ if __name__ == '__main__':
                         help='Number of optimization iterations for each action sequence.')
     parser.add_argument('--sigma', type=float, default=0.1,
                         help='Standard deviation of noise for nonparametric version.')
-    parser.add_argument('--logdir', type=str, default='runs/cem_comparison',
+    parser.add_argument('--logdir', type=str, default='runs/cem_gym',
                         help='Tensorboard log directory.')
     parser.add_argument('--save', action='store_true',
                         help='If True, save observations and actions.')

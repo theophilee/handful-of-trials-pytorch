@@ -1,5 +1,6 @@
 import gym
 from dotmap import DotMap
+import torch
 
 from .action_repeat import ActionRepeat
 
@@ -24,9 +25,11 @@ class Config:
         return next_obs - obs
 
     def get_reward(self, obs, act, next_obs):
-        reward_act = -1e-4 * (act ** 2).sum(dim=1)
         reward_run = (next_obs[:, 0] - obs[:, 0]) / self.env.dt
-        return reward_act + reward_run
+        reward_act = -1e-4 * (act ** 2).sum(dim=1) * self.env.amount
+        reward = reward_act + reward_run
+        done = torch.zeros_like(reward)
+        return reward, done
 
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,

@@ -32,11 +32,12 @@ class Config:
 
     def get_reward(self, obs, act, next_obs):
         tip_pos, obj_pos, goal_pos = obs[:, 14:17], obs[:, 17:20], obs[:, 20:23]
-        reward_near = -torch.norm(obj_pos - tip_pos, dim=1)
-        reward_dist = -torch.norm(obj_pos - goal_pos, dim=1)
-        reward_ctrl = -(act ** 2).sum(dim=1)
-        reward = reward_dist + 0.1 * reward_ctrl + 0.5 * reward_near
-        return reward
+        reward_near = -torch.norm(obj_pos - tip_pos, dim=1) * self.env.amount
+        reward_dist = -torch.norm(obj_pos - goal_pos, dim=1) * self.env.amount
+        reward_act = -(act ** 2).sum(dim=1) * self.env.amount
+        reward = reward_dist + 0.1 * reward_act + 0.5 * reward_near
+        done = torch.zeros_like(reward)
+        return reward, done
 
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,

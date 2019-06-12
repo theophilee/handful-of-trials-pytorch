@@ -47,7 +47,7 @@ def main(args):
     #exp.run_mpc_baseline()
     #exp.run_inner_loop_debug()
     #exp.run_behavior_cloning_debug()
-    exp.run_train_model_debug()
+    exp.run_train_model_debug(args.expert)
 
 
 if __name__ == "__main__":
@@ -83,6 +83,7 @@ if __name__ == "__main__":
                         help='Number of iterations to perform during CEM optimization.')
     parser.add_argument('--expert_demos', default=False, type=lambda x: (str(x).lower() == 'true'),
                         help='If True, add expert demonstrations to dynamics model training set.')
+    parser.add_argument('--expert', default=False, type=lambda x: (str(x).lower() == 'true'))
     args = parser.parse_args()
 
     main(args)

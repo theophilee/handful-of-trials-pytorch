@@ -34,7 +34,7 @@ def main(args):
     cfg.mpc_cfg.plan_hor = args.plan_hor
     param_str = (f'deterministic={args.deterministic}_nets={args.ensemble_size}_hid={args.hid_features}'
                  f'_act={args.activation}_decay={args.weight_decay}_lr={args.lr}'
-                 f'_iter={args.iterations}_part={args.num_part}_hor={args.plan_hor}_expert={args.expert}')
+                 f'_iter={args.iterations}_part={args.num_part}_hor={args.plan_hor}')
 
     # Model predictive control policy
     mpc = MPC(cfg.mpc_cfg)
@@ -83,7 +83,6 @@ if __name__ == "__main__":
                         help='Number of iterations to perform during CEM optimization.')
     parser.add_argument('--expert_demos', default=False, type=lambda x: (str(x).lower() == 'true'),
                         help='If True, add expert demonstrations to dynamics model training set.')
-    parser.add_argument('--expert', default=False, type=lambda x: (str(x).lower() == 'true'))
     args = parser.parse_args()
 
     main(args)

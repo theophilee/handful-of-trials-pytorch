@@ -41,11 +41,13 @@ def main(args):
     exp = Experiment(mpc, policy, args.env, param_str, args.logdir, args.savedir, cfg.exp_cfg)
     exp.run_mpc_baseline()
     #exp.run_inner_loop_debug()
+    #exp.run_behavior_cloning_debug()
+    #exp.run_train_model_debug()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env', type=str, default='half_cheetah',
+    parser.add_argument('--env', type=str, default='humanoid',
                         help='Env name: one of {}.'.format(ALLOWED_ENVS))
     parser.add_argument('--logdir', type=str, default='runs/main',
                         help='Log directory for Tensorboard.')

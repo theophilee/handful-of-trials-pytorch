@@ -89,39 +89,26 @@ class Experiment:
     def run_behavior_cloning_debug(self):
         """Train parameterized policy with behaviour cloning on saved expert demonstrations.
         """
-        # Load expert demonstrations
         obs, acts = self._load_expert_demos()
+        obs, acts = obs[:, :-1].reshape(-1, obs.shape[-1]), acts.reshape(-1, acts.shape[-1])
 
         # Train parameterized policy by behavior cloning
-        self.policy.train(obs[:, :-1], acts, iterative=False)
+        self.policy.train(obs, acts, iterative=False)
 
         # Sample rollout from parameterized policy for evaluation
-        obs_policy, acts_policy, score_policy = self._sample_rollout(actor=self.policy)
-        print_rollout_stats(obs_policy, acts_policy, score_policy)
+        obs, acts, length, score = self._sample_rollout(actor=self.policy)
+        print_rollout_stats(obs, acts, length, score)
 
         torch.save(self.policy, os.path.join(self.savedir, 'policy.pth'))
 
     def run_train_model_debug(self):
         """Train dynamics model on saved expert demonstrations.
         """
-        obs, acts, _ = self._sample_rollouts(self.init_rollouts, actor=self.mpc)
-        obs_expert, acts_expert = self._load_expert_demos()
-        #obs = np.concatenate((obs, obs_expert), axis=0)
-        #acts = np.concatenate((acts, acts_expert), axis=0)
+        obs, acts, _, _ = self._sample_rollouts(self.init_steps, actor=self.mpc)
+        #obs, acts = self._load_expert_demos()
 
-        #self.mpc.train(obs_expert, acts_expert, iterative=False, debug_logger=self.logger)
-        #torch.save(self.mpc, os.path.join(self.savedir, 'mpc.pth'))
-
-        metrics, _ = self.mpc.train(obs, acts, iterative=True)
-        for k, v in metrics.items():
-            print(f'{k}: {v}')
-            self.logger.log_scalar(k, v, self.init_rollouts)
-
-        for step, (obs, acts) in enumerate(zip(obs_expert, acts_expert)):
-            metrics, _ = self.mpc.train(obs, acts, iterative=True)
-            for k, v in metrics.items():
-                print(f'{k}: {v}')
-                self.logger.log_scalar(k, v, self.init_rollouts + step + 1)
+        self.mpc.train(obs, acts, iterative=False, debug_logger=self.logger)
+        torch.save(self.mpc, os.path.join(self.savedir, 'mpc.pth'))
 
     def run_experiment_debug(self):
         """Train parameterized policy by imitation learning (DAgger) on trajectories

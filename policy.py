@@ -25,8 +25,6 @@ class Policy:
             obs_preproc (func): A function which modifies observations before they
                 are passed into the policy.
         """
-        # TODO add observation pre-processing as for model?
-        # TODO add output non-linearity?
         self.obs_features = obs_features
         self.act_features = env.action_space.shape[0]
         self.act_bound = env.action_space.high[0]
@@ -64,13 +62,21 @@ class Policy:
         self.Y = torch.empty((0, self.act_features))
 
     def train(self, obs, acts, train_split=0.8, iterative=True):
+        """ Train policy.
+
+        Arguments:
+            obs (2D np.ndarray or 2D torch.Tensor): observations.
+            acts (2D np.ndarray or 2D torch.Tensor): actions.
+            train_split (float): proportion of data used for training
+            iterative (bool): if True, add new data to training set otherwise
+                start training set from scratch
+            reset_model (bool): if True, reset model weights and optimizer
+            debug_logger: if not None, plot metrics every epoch
+        """
         self.has_been_trained = True
 
         # Preprocess new data
         if isinstance(obs, np.ndarray):
-            if obs.ndim == 3:
-                obs = obs.reshape(-1, obs.shape[-1])
-                acts = acts.reshape(-1, acts.shape[-1])
             obs, acts = torch.from_numpy(obs).float(), torch.from_numpy(acts).float()
         X_new, Y_new = self.obs_preproc(obs), acts
 
@@ -137,9 +143,9 @@ class Policy:
         """Returns the action that this policy would take for each of the observations in obs.
 
         Arguments:
-            obs (2D torch.Tensor): Observations (num_obs, obs_features).
+            obs (2D torch.Tensor): Observations (num_obs, obs_features) on CPU.
 
-        Returns: Actions (2D torch.Tensor).
+        Returns: Actions (2D torch.Tensor) on CPU.
         """
         if not self.has_been_trained:
             acts = torch.FloatTensor(obs.shape[0], self.act_features)

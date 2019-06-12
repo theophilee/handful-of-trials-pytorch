@@ -9,11 +9,12 @@ TORCH_DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.devi
 
 
 class BootstrapEnsemble:
-    def __init__(self, ensemble_size, in_features, out_features, hid_features, activation,
-                 lr, weight_decay):
+    def __init__(self, deterministic, ensemble_size, in_features, out_features, hid_features,
+                 activation, lr, weight_decay):
         """ Ensemble of bootstrap model.
 
         Args:
+            deterministic (bool): if True, dynamics are deterministic
             ensemble_size (int): size of the bootstrap ensemble
             in_features (int): size of each input sample
             out_features (int): size of each output sample
@@ -22,11 +23,9 @@ class BootstrapEnsemble:
             lr (float): learning rate for optimizer
             weight_decay (float): weight decay for model parameters
         """
-        self.ensemble_size = ensemble_size
-
+        self.deterministic = deterministic
         self.net = self._make_network(
             ensemble_size, in_features, out_features, hid_features, activation).to(TORCH_DEVICE)
-
         self.optim = torch.optim.Adam(self.net.parameters(), lr=lr, weight_decay=weight_decay)
 
     def _make_network(self, ensemble_size, in_features, out_features, hid_features, activation):
@@ -56,22 +55,31 @@ class BootstrapEnsemble:
 
     def sample(self, input):
         mean, logvar = self.predict(input)
-        sample = mean + torch.randn_like(mean, device=TORCH_DEVICE) * logvar.exp().sqrt()
-        return sample
+        if self.deterministic:
+            return mean
+        else:
+            return mean + torch.randn_like(mean, device=TORCH_DEVICE) * logvar.exp().sqrt()
 
     def update(self, input, targ):
-        # Compute model predictions
+        # Model predictions
         mean, logvar = self.predict(input)
 
-        # Compute cross-entropy loss
-        inv_var = torch.exp(-logvar)
-        mse = (mean - targ) ** 2
-        xentropy = mse * inv_var + logvar
-        loss = xentropy.mean()
+        if self.deterministic:
+            mse = (mean - targ) ** 2
+            xentropy = mse
+            loss = mse.mean()
+            reg = torch.zeros(1)
 
-        # Small special regularization for max and min log variance parameters
-        reg = 1e-4 * (self.net[-1].max_logvar.mean() - self.net[-1].min_logvar.mean())
-        loss += reg
+        else:
+            # Cross-entropy loss
+            inv_var = torch.exp(-logvar)
+            mse = (mean - targ) ** 2
+            xentropy = mse * inv_var + logvar
+            loss = xentropy.mean()
+
+            # Small special regularization for max and min log variance parameters
+            reg = 1e-6 * (self.net[-1].max_logvar.mean() - self.net[-1].min_logvar.mean())
+            loss += reg
 
         # Take a gradient step
         self.optim.zero_grad()
@@ -84,8 +92,13 @@ class BootstrapEnsemble:
     def evaluate(self, input, targ):
         mean, logvar = self.predict(input)
 
-        inv_var = torch.exp(-logvar)
-        mse = (mean - targ) ** 2
-        xentropy = mse * inv_var + logvar
+        if self.deterministic:
+            mse = (mean - targ) ** 2
+            xentropy = mse
+
+        else:
+            inv_var = torch.exp(-logvar)
+            mse = (mean - targ) ** 2
+            xentropy = mse * inv_var + logvar
 
         return mse.mean((-2, -1)).cpu().detach(), xentropy.mean((-2, -1)).cpu().detach()

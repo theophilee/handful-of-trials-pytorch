@@ -2,7 +2,7 @@
 Implementation of Twin Delayed Deep Deterministic Policy Gradients (TD3)
 Paper: https://arxiv.org/abs/1802.09477
 Example usage:
-python model_free.py MyHalfCheetah-v2
+python TD3.py MyHalfCheetah-v2
 """
 import torch.nn as nn
 import torch.nn.functional as F
@@ -203,7 +203,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("env")  # OpenAI gym environment name
-    parser.add_argument("--repeat", default=4, type=int)  # Action repeat
+    parser.add_argument("--repeat", default=1, type=int)  # Action repeat
     parser.add_argument("--savedir", default="save/TD3")  # Save directory
     parser.add_argument("--seed", default=0, type=int)  # Sets Gym, PyTorch and Numpy seeds
     parser.add_argument("--start_timesteps", default=1e4,
@@ -242,9 +242,7 @@ if __name__ == "__main__":
     done = True
 
     while total_timesteps < args.max_timesteps:
-
         if done:
-
             if total_timesteps != 0:
                 print("Total T: %d Episode Num: %d Episode T: %d Reward: %f" % (
                     total_timesteps, episode_num, episode_timesteps, episode_reward))
@@ -278,7 +276,6 @@ if __name__ == "__main__":
         replay_buffer.add((obs, new_obs, action, reward, float(done)))
 
         obs = new_obs
-
         episode_timesteps += 1
         total_timesteps += 1
         timesteps_since_eval += 1

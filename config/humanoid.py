@@ -40,18 +40,19 @@ class Config:
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,
                           "expert_demos": False,
-                          "init_steps": 50000,
+                          "init_steps": 200000,
                           "total_steps": 1000000,
                           "train_freq": 3000,
                           "imaginary_steps": 5000})
 
-        model_cfg = DotMap({"ensemble_size": 5,
+        model_cfg = DotMap({"deterministic": True,
+                            "ensemble_size": 5,
                             "in_features": self.obs_features_preprocessed + self.act_features,
                             "out_features": self.obs_features,
                             "hid_features": [200, 200, 200, 200],
                             "activation": "swish",
                             "lr": 1e-3,
-                            "weight_decay": 1e-4})
+                            "weight_decay": 0})
 
         opt_cfg = DotMap({"iterations": 5,
                           "popsize": 1000,

@@ -163,8 +163,10 @@ class MPC:
                                      "model/xentropy/val": val_xentropy.mean()},
                          "tensors": {"model/max_logvar": self.model.net[-1].max_logvar,
                                      "model/min_logvar": self.model.net[-1].min_logvar}}
+            for name, param in self.model.net.named_parameters():
+                info_step["tensors"][f"model/{name}"] = param
 
-            if debug_logger is not None:
+            if debug_logger is not None and epoch % 10 == 0:
                 for k, v in info_step["metrics"].items():
                     debug_logger.log_scalar(k, v, epoch)
                 for k, v in info_step["tensors"].items():
@@ -199,10 +201,13 @@ class MPC:
         in obs. Used to sample multiple rollouts in parallel.
 
         Arguments:
-            obs (2D torch.Tensor): Observations (num_obs, obs_features) on CPU.
+            obs (2D torch.Tensor or np.ndarray): Observations (num_obs, obs_features) on CPU.
 
         Returns: Actions (2D torch.Tensor) on CPU.
         """
+        if isinstance(obs, np.ndarray):
+            obs = torch.from_numpy(obs).float()
+
         plans = self.optimizer.obtain_solution(obs, self._compile_score)
         # Return the first action of each plan
         return plans[:, 0]
@@ -237,7 +242,7 @@ class MPC:
         return torch.cat(observations[:-1]), torch.cat(actions)
 
     @torch.no_grad()
-    def _compile_score(self, plans, cur_obs, batch_size=20000):
+    def _compile_score(self, plans, cur_obs, batch_size=1000000):
         """Compute score of plans (sequences of actions) starting at observations in
         cur_obs under the learned dynamics.
 
@@ -246,7 +251,7 @@ class MPC:
                 (num_obs, num_plans, plan_hor * act_features).
             cur_obs (2D torch.Tensor): Starting observations to compile scores of shape
                 (num_obs, obs_features).
-            batch_size (int: Batch size for parallel computation.
+            batch_size (int): Batch size for parallel computation.
 
         Returns:
             scores (2D torch.Tensor): Score of plans of shape (num_obs, num_plans).
@@ -285,6 +290,8 @@ class MPC:
                 alives = torch.min(alives, 1 - dones)
                 scores[i * batch_size:(i+1) * batch_size] += alives * rewards
                 obs = next_obs
+                if alives.sum() == 0:
+                    break
 
         # Average score over particles
         scores = scores.view(num_obs, num_plans, self.num_part).mean(dim=-1)

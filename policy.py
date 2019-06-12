@@ -65,8 +65,8 @@ class Policy:
         """ Train policy.
 
         Arguments:
-            obs (2D np.ndarray or 2D torch.Tensor): observations.
-            acts (2D np.ndarray or 2D torch.Tensor): actions.
+            obs (2D np.ndarray or torch.Tensor): observations.
+            acts (2D np.ndarray or torch.Tensor): actions.
             train_split (float): proportion of data used for training
             iterative (bool): if True, add new data to training set otherwise
                 start training set from scratch
@@ -77,7 +77,9 @@ class Policy:
 
         # Preprocess new data
         if isinstance(obs, np.ndarray):
-            obs, acts = torch.from_numpy(obs).float(), torch.from_numpy(acts).float()
+            obs = torch.from_numpy(obs).float()
+        if isinstance(acts, np.ndarray):
+            acts = torch.from_numpy(acts).float()
         X_new, Y_new = self.obs_preproc(obs), acts
 
         if iterative:
@@ -143,7 +145,7 @@ class Policy:
         """Returns the action that this policy would take for each of the observations in obs.
 
         Arguments:
-            obs (2D torch.Tensor): Observations (num_obs, obs_features) on CPU.
+            obs (2D torch.Tensor or np.ndarray): Observations (num_obs, obs_features) on CPU.
 
         Returns: Actions (2D torch.Tensor) on CPU.
         """
@@ -151,6 +153,9 @@ class Policy:
             acts = torch.FloatTensor(obs.shape[0], self.act_features)
             acts = acts.uniform_(-self.act_bound, self.act_bound)
             return acts
+
+        if isinstance(obs, np.ndarray):
+            obs = torch.from_numpy(obs).float()
 
         return self.predict(self.obs_preproc(obs.to(TORCH_DEVICE))).cpu()
 
@@ -163,8 +168,7 @@ class Policy:
 
         Returns: An action (1D numpy.ndarray).
         """
-        obs = torch.from_numpy(obs[np.newaxis]).float()
-        return self.act_parallel(obs)[0].numpy()
+        return self.act_parallel(obs[np.newaxis])[0].numpy()
 
     def _fit_input_stats(self, input):
         # Store data statistics for normalization

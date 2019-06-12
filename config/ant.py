@@ -36,7 +36,7 @@ class Config:
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,
                           "expert_demos": False,
-                          "init_steps": 10000,
+                          "init_steps": 200000,
                           "total_steps": 1000000,
                           "train_freq": 3000,
                           "imaginary_steps": 5000})

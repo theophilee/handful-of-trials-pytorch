@@ -1,7 +1,4 @@
-import torch
-import torch.nn as nn
-
-from .layers import BootstrapLinear, BootstrapGaussian, Swish
+from .layers import *
 
 
 ACTIVATIONS = {'relu': nn.ReLU(), 'swish': Swish(), 'tanh': nn.Tanh()}
@@ -9,12 +6,12 @@ TORCH_DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.devi
 
 
 class BootstrapEnsemble:
-    def __init__(self, deterministic, ensemble_size, in_features, out_features, hid_features,
+    def __init__(self, stochasticity, ensemble_size, in_features, out_features, hid_features,
                  activation, lr, weight_decay):
         """ Ensemble of bootstrap model.
 
         Args:
-            deterministic (bool): if True, dynamics are deterministic
+            stochasticity (str): one of 'deterministic', 'gaussian', 'gaussian_bias'
             ensemble_size (int): size of the bootstrap ensemble
             in_features (int): size of each input sample
             out_features (int): size of each output sample
@@ -23,24 +20,27 @@ class BootstrapEnsemble:
             lr (float): learning rate for optimizer
             weight_decay (float): weight decay for model parameters
         """
-        self.deterministic = deterministic
+        self.stochasticity = stochasticity
         self.net = self._make_network(
             ensemble_size, in_features, out_features, hid_features, activation).to(TORCH_DEVICE)
         self.optim = torch.optim.Adam(self.net.parameters(), lr=lr, weight_decay=weight_decay)
 
     def _make_network(self, ensemble_size, in_features, out_features, hid_features, activation):
-        if len(hid_features) > 0:
-            layers = []
+        layers = []
 
-            for in_f, out_f in zip([in_features] + hid_features, hid_features):
-                layers.append(BootstrapLinear(ensemble_size, in_f, out_f))
-                layers.append(ACTIVATIONS[activation])
+        for in_f, out_f in zip([in_features] + hid_features, hid_features):
+            layers.append(BootstrapLinear(ensemble_size, in_f, out_f))
+            layers.append(ACTIVATIONS[activation])
 
-            layers.append(BootstrapGaussian(ensemble_size, hid_features[-1], out_features))
-            return nn.Sequential(*layers)
+        if self.stochasticity == 'deterministic':
+            output = BootstrapLinear
+        elif self.stochasticity == 'gaussian':
+            output = BootstrapGaussian
+        elif self.stochasticity == 'gaussian_bias':
+            output = BootstrapGaussianBias
+        layers.append(output(ensemble_size, hid_features[-1], out_features))
 
-        else:
-            nn.Sequential(BootstrapGaussian(ensemble_size, in_features, out_features))
+        return nn.Sequential(*layers)
 
     def fit_input_stats(self, input):
         # Store data statistics for normalization
@@ -54,51 +54,82 @@ class BootstrapEnsemble:
         return self.net(input)
 
     def sample(self, input):
-        mean, logvar = self.predict(input)
-        if self.deterministic:
-            return mean
+        if self.stochasticity == 'deterministic':
+            return self.predict(input)
         else:
+            mean, logvar = self.predict(input)
             return mean + torch.randn_like(mean, device=TORCH_DEVICE) * logvar.exp().sqrt()
 
     def update(self, input, targ):
-        # Model predictions
-        mean, logvar = self.predict(input)
+        metrics = {}
 
-        if self.deterministic:
+        if self.stochasticity == 'deterministic':
+            mean = self.predict(input)
+
+            # Mean squared error loss
             mse = (mean - targ) ** 2
-            xentropy = mse
+            xentropy = mse # To share code with stochastic dynamics
             loss = mse.mean()
-            reg = torch.zeros(1)
 
         else:
+            mean, logvar = self.predict(input)
+
             # Cross-entropy loss
             inv_var = torch.exp(-logvar)
             mse = (mean - targ) ** 2
             xentropy = mse * inv_var + logvar
             loss = xentropy.mean()
 
-            # Small special regularization for max and min log variance parameters
-            reg = 1e-6 * (self.net[-1].max_logvar.mean() - self.net[-1].min_logvar.mean())
-            loss += reg
+            if self.stochasticity == 'gaussian':
+                # Small special regularization for max and min log variance parameters
+                reg = 1e-6 * (self.net[-1].max_logvar.mean() - self.net[-1].min_logvar.mean())
+                loss += reg
+
+            metrics['logvar/mean_train'] = logvar.mean()
+            metrics['logvar/min_train'] = logvar.min()
+            metrics['logvar/max_train'] = logvar.max()
+            metrics['logvar/std_train'] = logvar.std()
+
+        mse = mse.cpu().detach()
+        xentropy = xentropy.cpu().detach()
+        metrics['mse/mean_train'] = mse.mean()
+        metrics['mse/min_train'] = mse.min()
+        metrics['mse/max_train'] = mse.max()
+        metrics['mse/std_train'] = mse.std()
+        metrics['xentropy/mean_train'] = xentropy.mean()
 
         # Take a gradient step
         self.optim.zero_grad()
         loss.backward()
         self.optim.step()
 
-        # Return per model mean squared error and cross-entropy and special regularization
-        return mse.mean((-2, -1)).cpu().detach(), xentropy.mean((-2, -1)).cpu().detach(), reg
+        return metrics
 
-    def evaluate(self, input, targ):
-        mean, logvar = self.predict(input)
+    def evaluate(self, input, targ, tag):
+        metrics = {}
 
-        if self.deterministic:
+        if self.stochasticity == 'deterministic':
+            mean = self.predict(input)
             mse = (mean - targ) ** 2
             xentropy = mse
 
         else:
+            mean, logvar = self.predict(input)
             inv_var = torch.exp(-logvar)
             mse = (mean - targ) ** 2
             xentropy = mse * inv_var + logvar
 
-        return mse.mean((-2, -1)).cpu().detach(), xentropy.mean((-2, -1)).cpu().detach()
+            metrics['logvar/mean_train'] = logvar.mean()
+            metrics['logvar/min_train'] = logvar.min()
+            metrics['logvar/max_train'] = logvar.max()
+            metrics['logvar/std_train'] = logvar.std()
+
+        mse = mse.cpu().detach()
+        xentropy = xentropy.cpu().detach()
+        metrics[f'mse/mean_{tag}'] = mse.mean()
+        metrics[f'mse/min_{tag}'] = mse.min()
+        metrics[f'mse/max_{tag}'] = mse.max()
+        metrics[f'mse/std_{tag}'] = mse.std()
+        metrics[f'xentropy/mean_{tag}'] = xentropy.mean()
+
+        return metrics

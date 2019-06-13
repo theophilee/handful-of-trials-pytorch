@@ -36,9 +36,9 @@ class Config:
     def get_config(self):
         exp_cfg = DotMap({"env": self.env,
                           "expert_demos": False,
-                          "init_steps": 200000,
-                          "total_steps": 1000000,
-                          "train_freq": 3000,
+                          "init_steps": 5000,
+                          "total_steps": 100000,
+                          "train_freq": 1000,
                           "imaginary_steps": 5000})
 
         model_cfg = DotMap({"ensemble_size": 5,
@@ -54,9 +54,9 @@ class Config:
                           "num_elites": 50})
 
         mpc_cfg = DotMap({"env": self.env,
-                          "plan_hor": 20,
+                          "plan_hor": 25,
                           "num_part": 20,
-                          "batches_per_epoch": 200,
+                          "batches_per_epoch": 100,
                           "obs_preproc": self.obs_preproc,
                           "pred_postproc": self.pred_postproc,
                           "targ_proc": self.targ_proc,

@@ -1,5 +1,4 @@
 from torch.utils.data import TensorDataset
-from functools import partial
 import time
 import math
 
@@ -72,13 +71,9 @@ class MPC:
         self.Y = torch.empty((0, args.model_cfg.out_features))
 
         # Bootstrap ensemble model
-        self.reset_model = partial(self._reset_model, model_cfg=args.model_cfg)
-        self.model = self.reset_model()
+        self.model = BootstrapEnsemble(**args.model_cfg)
 
-    def _reset_model(self, model_cfg):
-        return BootstrapEnsemble(**model_cfg)
-
-    def train(self, obs, acts, train_split=0.8, iterative=True, reset_model=False, debug_logger=None):
+    def train(self, obs, acts, train_split=0.8, iterative=True, debug_logger=None):
         """ Train bootstrap ensemble model.
 
         Arguments:
@@ -87,7 +82,6 @@ class MPC:
             train_split (float): proportion of data used for training
             iterative (bool): if True, add new data to training set otherwise
                 start training set from scratch
-            reset_model (bool): if True, reset model weights and optimizer
             debug_logger: if not None, plot metrics every epoch
         """
         self.has_been_trained = True
@@ -107,11 +101,7 @@ class MPC:
         # Record mse and cross-entropy on new test data
         metrics = {}
         if iterative and hasattr(self.model, 'input_mean'):
-            mse, xentropy = self.model.evaluate(X_new.to(TORCH_DEVICE), Y_new.to(TORCH_DEVICE))
-            metrics["model/mse/test"], metrics["model/xentropy/test"] = mse.mean(), xentropy.mean()
-
-        if reset_model:
-            self.model = self.reset_model()
+            metrics.update(self.model.evaluate(X_new.to(TORCH_DEVICE), Y_new.to(TORCH_DEVICE), 'test'))
 
         # Store input statistics for normalization
         self.model.fit_input_stats(self.X)
@@ -130,56 +120,47 @@ class MPC:
         val_batches = self.batches_per_epoch - train_batches
 
         early_stopping = EarlyStopping(patience=20)
-        start = time.time()
 
         # Training loop
+        start = time.time()
         epoch = 0
         while not early_stopping.early_stop:
             epoch += 1
             train_idxs_epoch = train_idxs[:, torch.randperm(train_size)]
             val_idxs_epoch = val_idxs[:, torch.randperm(val_size)]
 
-            train_mse = torch.zeros((train_batches, self.num_nets))
-            train_xentropy = torch.zeros((train_batches, self.num_nets))
-            train_reg = torch.zeros(train_batches)
-            val_mse = torch.zeros((val_batches, self.num_nets))
-            val_xentropy = torch.zeros((val_batches, self.num_nets))
-
+            train_metrics = Metrics()
             for i in range(train_batches):
                 X, Y = dataset[train_idxs_epoch[:, i*batch_size:(i+1)*batch_size]]
                 X, Y = X.to(TORCH_DEVICE), Y.to(TORCH_DEVICE)
-                train_mse[i], train_xentropy[i], train_reg[i] = self.model.update(X, Y)
+                train_metrics.store(self.model.update(X, Y))
 
+            val_metrics = Metrics()
             for i in range(val_batches):
                 X, Y = dataset[val_idxs_epoch[:, i*batch_size:(i+1)*batch_size]]
                 X, Y = X.to(TORCH_DEVICE), Y.to(TORCH_DEVICE)
-                val_mse[i], val_xentropy[i] = self.model.evaluate(X, Y)
+                val_metrics.store(self.model.evaluate(X, Y, 'val'))
 
-            # Record epoch train/val mse and cross-entropy averaged across models
-            info_step = {"metrics": {"model/mse/train": train_mse.mean(),
-                                     "model/xentropy/train": train_xentropy.mean(),
-                                     "model/regularization/train": train_reg.mean(),
-                                     "model/mse/val": val_mse.mean(),
-                                     "model/xentropy/val": val_xentropy.mean()},
-                         "tensors": {"model/max_logvar": self.model.net[-1].max_logvar,
-                                     "model/min_logvar": self.model.net[-1].min_logvar}}
-            for name, param in self.model.net.named_parameters():
-                info_step["tensors"][f"model/{name}"] = param
+            info_epoch = {'metrics': {}, 'tensors': {}}
+            info_epoch['metrics'].update(train_metrics.average())
+            info_epoch['metrics'].update(val_metrics.average())
+            weights = {name: param for name, param in self.model.net.named_parameters()}
+            info_epoch['tensors'].update(weights)
 
             if debug_logger is not None and epoch % 10 == 0:
-                for k, v in info_step["metrics"].items():
+                for k, v in info_epoch['metrics'].items():
                     debug_logger.log_scalar(k, v, epoch)
-                for k, v in info_step["tensors"].items():
+                for k, v in info_epoch['tensors'].items():
                     debug_logger.log_histogram(k, v, epoch)
 
             # Stop if mean validation cross-entropy across all models stops decreasing
-            early_stopping.step(val_xentropy.mean(), self.model.net, info_step)
+            early_stopping.step(info_epoch['metrics']['xentropy/mean_val'], self.model.net, info_epoch)
 
         # Load policy with best validation loss
         info_best = early_stopping.load_best(self.model.net)
-        metrics.update(info_best["metrics"])
-        metrics["model/train_time"] = time.time() - start
-        metrics["model/train_epochs"] = epoch - early_stopping.patience
+        metrics.update(info_best['metrics'])
+        metrics['time/train_time'] = time.time() - start
+        metrics['time/train_epochs'] = epoch - early_stopping.patience
 
         return metrics, info_best["tensors"]
 

@@ -31,7 +31,6 @@ class Logger:
     def __init__(self, logdir):
         if not os.path.exists(logdir):
             os.makedirs(logdir)
-
         try:
             shutil.rmtree(logdir)
         except FileNotFoundError:
@@ -96,3 +95,23 @@ class EarlyStopping:
         network.load_state_dict(torch.load(self.ckpt_file))
         os.remove(self.ckpt_file)
         return self.info_best
+
+
+class Metrics:
+    """Keep track of metrics over time in a dictionary.
+    """
+
+    def __init__(self):
+        self.metrics = {}
+        self.count = 0
+
+    def store(self, new_metrics):
+        self.count += 1
+        for key in new_metrics:
+            if key in self.metrics:
+                self.metrics[key] += new_metrics[key]
+            else:
+                self.metrics[key] = new_metrics[key]
+
+    def average(self):
+        return {k: v / self.count for k, v in self.metrics.items()}

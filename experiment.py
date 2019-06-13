@@ -56,10 +56,6 @@ class Experiment:
     def run_mpc_baseline(self):
         """Model predictive control baseline, no parameterized policy.
         """
-        obs, acts, lengths, _ = self._sample_rollouts(1000, actor=self.mpc)
-        self.mpc.train(obs, acts, iterative=True)
-        self._sample_rollout(self.mpc)
-
         # Initial random rollouts
         obs, acts, lengths, _ = self._sample_rollouts(self.init_steps, actor=self.mpc)
 
@@ -75,9 +71,9 @@ class Experiment:
             obs, acts, lengths, scores = self._sample_rollouts(self.train_freq, actor=self.mpc)
             step += sum(lengths)
             print_rollout_stats(obs[0], acts[0], lengths[0], scores[0])
-            self.logger.log_scalar("rollout/avg_length", np.mean(lengths), step)
-            self.logger.log_scalar("rollout/avg_score", np.mean(scores), step)
-            self.logger.log_scalar("rollout/time", (time.time() - start), step)
+            self.logger.log_scalar("score/avg_length", np.mean(lengths), step)
+            self.logger.log_scalar("score/avg_score", np.mean(scores), step)
+            self.logger.log_scalar("time/rollout_time", (time.time() - start), step)
 
             # Train model
             metrics, tensors = self.mpc.train(obs, acts, iterative=True)
@@ -104,15 +100,12 @@ class Experiment:
 
         torch.save(self.policy, os.path.join(self.savedir, 'policy.pth'))
 
-    def run_train_model_debug(self, expert):
+    def run_train_model_debug(self):
         """Train dynamics model on saved expert demonstrations.
         """
         #obs, acts, _, _ = self._sample_rollouts(5000, actor=self.mpc)
         #obs, acts, _, _ = self._sample_rollouts(self.init_steps, actor=self.mpc)
-        if expert:
-            obs, acts = self._load_expert_demos()
-        else:
-            obs, acts, _, _ = self._sample_rollouts(10000, actor=self.mpc)
+        obs, acts = self._load_expert_demos()
 
         self.mpc.train(obs, acts, iterative=False, debug_logger=self.logger)
         #torch.save(self.mpc, os.path.join(self.savedir, 'mpc.pth'))

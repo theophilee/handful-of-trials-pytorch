@@ -43,18 +43,14 @@ class Policy:
         self.Y = torch.empty((0, self.act_features))
     
     def _make_network(self, obs_features, act_features, hid_features, activation):
-        if len(hid_features) > 0:
-            layers = []
+        layers = []
 
-            for in_f, out_f in zip([obs_features] + hid_features, hid_features):
-                layers.append(nn.Linear(in_f, out_f))
-                layers.append(ACTIVATIONS[activation])
+        for in_f, out_f in zip([obs_features] + hid_features, hid_features):
+            layers.append(nn.Linear(in_f, out_f))
+            layers.append(ACTIVATIONS[activation])
 
-            layers.append(nn.Linear(hid_features[-1], act_features))
-            return nn.Sequential(*layers)
-
-        else:
-            nn.Sequential(nn.Linear(obs_features, act_features))
+        layers.append(nn.Linear(hid_features[-1], act_features))
+        return nn.Sequential(*layers)
 
     def reset_training_set(self):
         # Reset dataset used to train policy (start of inner loop iteration)

@@ -68,7 +68,7 @@ if __name__ == "__main__":
                         help='Number of bootstrap ensemble dynamics models.')
     parser.add_argument('--activation', type=str, default='swish',
                         help='Activation function for dynamics model.')
-    parser.add_argument('--weight_decay', type=float, default=0,
+    parser.add_argument('--weight_decay', type=float, default=1e-4,
                         help='Weight decay for dynamics model.')
     parser.add_argument('--lr', type=float, default=1e-3,
                         help='Learning rate for dynamics model.')

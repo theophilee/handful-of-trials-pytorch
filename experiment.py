@@ -3,7 +3,7 @@ import time
 import numpy as np
 import torch
 
-from utils import Logger
+from utils import Logger, Metrics
 
 
 def print_rollout_stats(obs, acts, length, score):
@@ -57,7 +57,7 @@ class Experiment:
         """Model predictive control baseline, no parameterized policy.
         """
         # Initial random rollouts
-        obs, acts, lengths, _ = self._sample_rollouts(self.init_steps, actor=self.mpc)
+        obs, acts, lengths, _, _ = self._sample_rollouts(self.init_steps, actor=self.mpc)
 
         # Train initial model
         self.mpc.train(obs, acts, iterative=True)
@@ -68,16 +68,24 @@ class Experiment:
             # Sample rollouts
             start = time.time()
             print(f"Rolling out {self.train_freq} timesteps...")
-            obs, acts, lengths, scores = self._sample_rollouts(self.train_freq, actor=self.mpc)
+            obs, acts, lengths, scores, rollouts_metrics = self._sample_rollouts(self.train_freq, actor=self.mpc)
             step += sum(lengths)
             print_rollout_stats(obs[0], acts[0], lengths[0], scores[0])
+
+            act_metrics = Metrics()
+            flat_rollouts_metrics = [item for sublist in rollouts_metrics for item in sublist]
+            for x in flat_rollouts_metrics:
+                act_metrics.store(x)
+            for k, v in act_metrics.average().items():
+                self.logger.log_scalar(k, v, step)
+
             self.logger.log_scalar("score/avg_length", np.mean(lengths), step)
             self.logger.log_scalar("score/avg_score", np.mean(scores), step)
             self.logger.log_scalar("time/rollout_time", (time.time() - start), step)
 
             # Train model
-            metrics, tensors = self.mpc.train(obs, acts, iterative=True)
-            for k, v in metrics.items():
+            train_metrics, tensors = self.mpc.train(obs, acts, iterative=True)
+            for k, v in train_metrics.items():
                 self.logger.log_scalar(k, v, step)
             for k, v in tensors.items():
                 self.logger.log_histogram(k, v, step)
@@ -252,7 +260,7 @@ class Experiment:
         rollouts, steps = [], 0
         while steps < max_steps:
             rollouts.append(self._sample_rollout(actor))
-            steps += rollouts[-1][-2]
+            steps += rollouts[-1][2]
         return zip(*rollouts)
 
     def _sample_rollout(self, actor):
@@ -266,13 +274,15 @@ class Experiment:
             acts (1D numpy.ndarray): Trajectory of actions (length, act_features).
             length (int): Number of timesteps.
             score (int): Sum of accumulated rewards.
+            action_metrics (list[dic]): Side information for each action.
         """
-        observations, actions, score, times = [self.env.reset()], [], 0, []
+        observations, actions, action_metrics, score = [self.env.reset()], [], [], 0
         for t in range(self.env.max_steps):
-            actions.append(actor.act(observations[t]))
+            act, act_info = actor.act(observations[t])
+            actions.append(act); action_metrics.append(act_info)
             obs, reward, done, _ = self.env.step(actions[t])
             observations.append(obs)
             score += reward
             if done:
                 break
-        return np.array(observations), np.array(actions), t + 1, score
+        return np.array(observations), np.array(actions), t + 1, score, action_metrics

@@ -162,9 +162,9 @@ class Policy:
         Arguments:
             obs (1D numpy.ndarray): An observation.
 
-        Returns: An action (1D numpy.ndarray).
+        Returns: An action (1D numpy.ndarray) and action metrics dictionary.
         """
-        return self.act_parallel(obs[np.newaxis])[0].numpy()
+        return self.act_parallel(obs[np.newaxis])[0].numpy(), {}
 
     def _fit_input_stats(self, input):
         # Store data statistics for normalization

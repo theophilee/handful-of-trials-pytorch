@@ -173,23 +173,30 @@ class MPC:
         Returns: Action (1D numpy.ndarray).
         """
         if not self.has_been_trained:
-            return np.random.uniform(-self.act_bound, self.act_bound, (self.act_features,))
+            return np.random.uniform(-self.act_bound, self.act_bound, (self.act_features,)), {}
 
-        return self.act_parallel(torch.from_numpy(obs[np.newaxis]).float())[0].cpu().numpy()
+        particle_info = Metrics()
+        obs = torch.from_numpy(obs[np.newaxis]).float()
+        act = self.act_parallel(obs, particle_info=particle_info)[0].cpu().numpy()
 
-    def act_parallel(self, obs):
+        return act, particle_info.average()
+
+    def act_parallel(self, obs, particle_info=None):
         """Returns the action that this controller would take for each of the observations
         in obs. Used to sample multiple rollouts in parallel.
 
         Arguments:
             obs (2D torch.Tensor or np.ndarray): Observations (num_obs, obs_features) on CPU.
+            particle_info (utils.Metrics): Dictionary to keep track of particle statistics
+                or None.
 
         Returns: Actions (2D torch.Tensor) on CPU.
         """
         if isinstance(obs, np.ndarray):
             obs = torch.from_numpy(obs).float()
 
-        plans = self.optimizer.obtain_solution(obs, self._compile_score)
+        plans = self.optimizer.obtain_solution(obs, self._compile_score, particle_info)
+
         # Return the first action of each plan
         return plans[:, 0]
 
@@ -223,7 +230,7 @@ class MPC:
         return torch.cat(observations[:-1]), torch.cat(actions)
 
     @torch.no_grad()
-    def _compile_score(self, plans, cur_obs, batch_size=1000000):
+    def _compile_score(self, plans, cur_obs, particle_info, batch_size=1000000):
         """Compute score of plans (sequences of actions) starting at observations in
         cur_obs under the learned dynamics.
 
@@ -232,6 +239,8 @@ class MPC:
                 (num_obs, num_plans, plan_hor * act_features).
             cur_obs (2D torch.Tensor): Starting observations to compile scores of shape
                 (num_obs, obs_features).
+            particle_info (utils.Metrics): Dictionary to keep track of particle statistics
+                or None.
             batch_size (int): Batch size for parallel computation.
 
         Returns:
@@ -264,12 +273,26 @@ class MPC:
             obs, plans = dataset[i * batch_size:(i+1) * batch_size]
             obs, plans = obs.to(TORCH_DEVICE), plans.to(TORCH_DEVICE)
             alives = torch.ones(obs.shape[0]).to(TORCH_DEVICE)
+
             for t in range(self.plan_hor):
                 acts = plans[:, t]
                 next_obs = self._predict_next_obs_divide(obs, acts)
+
+                # Measure diversity among particles
+                if particle_info is not None:
+                    particle_std = next_obs.view(-1, self.num_part, self.obs_features).std(dim=1)
+                    particle_std = particle_std.mean(dim=0).cpu()
+                    particle_info.store({'particle_std/mean()': particle_std.mean(),
+                                         'particle_std/min()': particle_std.min(),
+                                         'particle_std/max()': particle_std.max(),
+                                         'particle_std/std()': particle_std.std(),
+                                         'particle_std/median()': particle_std.median()})
+
+                # Compute rewards and done flags
                 rewards, dones = self.get_reward(obs, acts, next_obs)
                 alives = torch.min(alives, 1 - dones)
                 scores[i * batch_size:(i+1) * batch_size] += alives * rewards
+
                 obs = next_obs
                 if alives.sum() == 0:
                     break

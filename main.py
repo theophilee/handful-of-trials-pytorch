@@ -62,7 +62,7 @@ if __name__ == "__main__":
                         help='Random seed.')
     #parser.add_argument('--action_repeat', type=int, default=1,
     #                    help='Action repeat.')
-    parser.add_argument('--stochasticity', type=str, default='deterministic',
+    parser.add_argument('--stochasticity', type=str, default='gaussian_bias',
                         help='One of "deterministic", "gaussian", "gaussian_bias"')
     parser.add_argument('--ensemble_size', type=int, default=5,
                         help='Number of bootstrap ensemble dynamics models.')

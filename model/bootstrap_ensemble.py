@@ -77,7 +77,8 @@ class BootstrapEnsemble:
             # Cross-entropy loss
             inv_var = torch.exp(-logvar)
             mse = (mean - targ) ** 2
-            xentropy = mse * inv_var + logvar
+            rescaled_mse = mse * inv_var
+            xentropy = rescaled_mse + logvar
             loss = xentropy.mean()
 
             if self.stochasticity == 'gaussian':
@@ -89,6 +90,13 @@ class BootstrapEnsemble:
             metrics['logvar/min_train'] = logvar.min()
             metrics['logvar/max_train'] = logvar.max()
             metrics['logvar/std_train'] = logvar.std()
+            metrics['logvar/median_train'] = logvar.median()
+
+            metrics['rescaled_mse/mean_train'] = rescaled_mse.mean()
+            metrics['rescaled_mse/min_train'] = rescaled_mse.min()
+            metrics['rescaled_mse/max_train'] = rescaled_mse.max()
+            metrics['rescaled_mse/std_train'] = rescaled_mse.std()
+            metrics['rescaled_mse/median_train'] = rescaled_mse.median()
 
         mse = mse.cpu().detach()
         xentropy = xentropy.cpu().detach()
@@ -96,6 +104,7 @@ class BootstrapEnsemble:
         metrics['mse/min_train'] = mse.min()
         metrics['mse/max_train'] = mse.max()
         metrics['mse/std_train'] = mse.std()
+        metrics['mse/median_train'] = mse.median()
         metrics['xentropy/mean_train'] = xentropy.mean()
 
         # Take a gradient step
@@ -117,12 +126,20 @@ class BootstrapEnsemble:
             mean, logvar = self.predict(input)
             inv_var = torch.exp(-logvar)
             mse = (mean - targ) ** 2
-            xentropy = mse * inv_var + logvar
+            rescaled_mse = mse * inv_var
+            xentropy = rescaled_mse + logvar
 
-            metrics['logvar/mean_train'] = logvar.mean()
-            metrics['logvar/min_train'] = logvar.min()
-            metrics['logvar/max_train'] = logvar.max()
-            metrics['logvar/std_train'] = logvar.std()
+            metrics[f'logvar/mean_{tag}'] = logvar.mean()
+            metrics[f'logvar/min_{tag}'] = logvar.min()
+            metrics[f'logvar/max_{tag}'] = logvar.max()
+            metrics[f'logvar/std_{tag}'] = logvar.std()
+            metrics[f'logvar/median_{tag}'] = logvar.median()
+
+            metrics[f'rescaled_mse/mean_{tag}'] = rescaled_mse.mean()
+            metrics[f'rescaled_mse/min_{tag}'] = rescaled_mse.min()
+            metrics[f'rescaled_mse/max_{tag}'] = rescaled_mse.max()
+            metrics[f'rescaled_mse/std_{tag}'] = rescaled_mse.std()
+            metrics[f'rescaled_mse/median_{tag}'] = rescaled_mse.median()
 
         mse = mse.cpu().detach()
         xentropy = xentropy.cpu().detach()
@@ -130,6 +147,7 @@ class BootstrapEnsemble:
         metrics[f'mse/min_{tag}'] = mse.min()
         metrics[f'mse/max_{tag}'] = mse.max()
         metrics[f'mse/std_{tag}'] = mse.std()
+        metrics[f'mse/median_{tag}'] = mse.median()
         metrics[f'xentropy/mean_{tag}'] = xentropy.mean()
 
         return metrics

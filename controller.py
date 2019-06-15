@@ -280,7 +280,8 @@ class MPC:
 
             for t in range(self.plan_hor):
                 acts = plans[:, t]
-                next_obs = self._predict_next_obs_divide(obs, acts)
+                #next_obs = self._predict_next_obs_divide(obs, acts)
+                next_obs = self._predict_next_obs_average(obs, acts) # TODO
 
                 # Measure diversity among particles
                 if particle_info is not None:

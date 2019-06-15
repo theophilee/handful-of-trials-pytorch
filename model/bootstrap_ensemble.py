@@ -25,18 +25,13 @@ class BootstrapEnsemble:
         self.net = self._make_network(ensemble_size, in_features, out_features, hid_features,
                                       activation, dropout).to(TORCH_DEVICE)
 
-        params, default = [], []
+        special, default = [], []
         for name, param in self.net.named_parameters():
-            id = name.split('.')[-1]
-            if id == 'logvar':
-                params.append({'params': param, 'weight_decay': 0})
-            elif id == 'max_logvar':
-                params.append({'params': param, 'weight_decay': 1e-6})
-            elif id == 'min_logvar':
-                params.append({'params': param, 'weight_decay': -1e-6})
+            if name.split('.')[-1] in ['logvar', 'min_logvar', 'max_logvar']:
+                special.append(param)
             else:
                 default.append(param)
-        params.append({'params': default})
+        params = [{'params': special, 'weight_decay': 0}, {'params': default}]
         self.optim = torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
 
     def _make_network(self, ensemble_size, in_features, out_features, hid_features, activation,
@@ -95,6 +90,11 @@ class BootstrapEnsemble:
             rescaled_mse = mse * inv_var
             xentropy = rescaled_mse + logvar
             loss = xentropy.mean()
+
+            if self.stochasticity == 'gaussian':
+                # Small special regularization for max and min log variance parameters
+                reg = 1e-6 * (self.net[-1].max_logvar.mean() - self.net[-1].min_logvar.mean())
+                loss += reg
 
             metrics['logvar/mean_train'] = logvar.mean()
             metrics['logvar/min_train'] = logvar.min()

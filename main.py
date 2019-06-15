@@ -33,7 +33,7 @@ def main(args):
     cfg.mpc_cfg.opt_cfg.iterations = args.iterations
     cfg.mpc_cfg.plan_hor = args.plan_hor
     cfg.mpc_cfg.num_part = args.num_part
-    param_str = (f'AVERAGE_PARTICLES_{args.stochasticity}_nets={args.ensemble_size}_hid={args.hid_features}'
+    param_str = (f'FIXED_LENGTH_{args.stochasticity}_nets={args.ensemble_size}_hid={args.hid_features}'
                  f'_act={args.activation}_decay={args.weight_decay}_lr={args.lr}'
                  f'_iter={args.iterations}_hor={args.plan_hor}_part={args.num_part}') # TODO
 

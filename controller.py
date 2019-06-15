@@ -158,6 +158,7 @@ class MPC:
 
             # Stop if mean validation cross-entropy across all models stops decreasing
             early_stopping.step(info_epoch['metrics']['xentropy/mean_val'], self.model.net, info_epoch)
+            early_stopping.early_stop = 10 # TODO
 
         # Load policy with best validation loss
         info_best = early_stopping.load_best(self.model.net)
@@ -280,8 +281,7 @@ class MPC:
 
             for t in range(self.plan_hor):
                 acts = plans[:, t]
-                #next_obs = self._predict_next_obs_divide(obs, acts)
-                next_obs = self._predict_next_obs_average(obs, acts) # TODO
+                next_obs = self._predict_next_obs_divide(obs, acts)
 
                 # Measure diversity among particles by observation std dev
                 if particle_info is not None:

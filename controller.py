@@ -283,15 +283,14 @@ class MPC:
                 #next_obs = self._predict_next_obs_divide(obs, acts)
                 next_obs = self._predict_next_obs_average(obs, acts) # TODO
 
-                # Measure diversity among particles
+                # Measure diversity among particles by observation std dev
                 if particle_info is not None:
-                    particle_std = next_obs.view(-1, self.num_part, self.obs_features).std(dim=1)
-                    particle_std = particle_std.mean(dim=0).cpu()
-                    particle_info.store({'particle_std/mean()': particle_std.mean(),
-                                         'particle_std/min()': particle_std.min(),
-                                         'particle_std/max()': particle_std.max(),
-                                         'particle_std/std()': particle_std.std(),
-                                         'particle_std/median()': particle_std.median()})
+                    obs_std = next_obs.view(-1, self.num_part, self.obs_features).std(dim=1).mean(dim=0).cpu()
+                    particle_info.store({'particle/obs_std_mean': obs_std.mean(),
+                                         'particle/obs_std_min': obs_std.min(),
+                                         'particle/obs_std_max': obs_std.max(),
+                                         'particle/obs_std_std': obs_std.std(),
+                                         'particle/obs_std_median': obs_std.median()})
 
                 # Compute rewards and done flags
                 rewards, dones = self.get_reward(obs, acts, next_obs)
@@ -302,9 +301,19 @@ class MPC:
                 if alives.sum() == 0:
                     break
 
+        scores = scores.view(num_obs, num_plans, self.num_part)
+
+        # Measure diversity among particles by score std dev
+        if particle_info is not None:
+            score_std = scores.std(dim=-1).cpu()
+            particle_info.store({'particle/score_std_mean': score_std.mean(),
+                                 'particle/score_std_min': score_std.min(),
+                                 'particle/score_std_max': score_std.max(),
+                                 'particle/score_std_std': score_std.std(),
+                                 'particle/score_std_median': score_std.median()})
+
         # Average score over particles
-        scores = scores.view(num_obs, num_plans, self.num_part).mean(dim=-1)
-        return scores.cpu()
+        return scores.mean(dim=-1).cpu()
 
     def _predict_next_obs_average(self, obs, acts):
         """Predict next observation by averaging predictions of all models in ensemble.

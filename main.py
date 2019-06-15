@@ -33,7 +33,7 @@ def main(args):
     cfg.mpc_cfg.opt_cfg.iterations = args.iterations
     cfg.mpc_cfg.plan_hor = args.plan_hor
     cfg.mpc_cfg.num_part = args.num_part
-    param_str = (f'FIXED_LENGTH_{args.stochasticity}_nets={args.ensemble_size}_hid={args.hid_features}'
+    param_str = (f'DROPOUT_{args.stochasticity}_nets={args.ensemble_size}_hid={args.hid_features}'
                  f'_act={args.activation}_decay={args.weight_decay}_lr={args.lr}'
                  f'_iter={args.iterations}_hor={args.plan_hor}_part={args.num_part}') # TODO
 
@@ -71,7 +71,7 @@ if __name__ == "__main__":
                         help='Activation function for dynamics model.')
     parser.add_argument('--weight_decay', type=float, default=1e-4,
                         help='Weight decay for dynamics model.')
-    parser.add_argument('--dropout', type=float, default=0.5,
+    parser.add_argument('--dropout', type=float, default=0.5, # TODO
                         help='Dropout probability for dynamics model.')
     parser.add_argument('--lr', type=float, default=1e-3,
                         help='Learning rate for dynamics model.')

@@ -28,14 +28,13 @@ def main(args):
     cfg.mpc_cfg.model_cfg.hid_features = args.hid_features
     cfg.mpc_cfg.model_cfg.activation = args.activation
     cfg.mpc_cfg.model_cfg.weight_decay = args.weight_decay
-    cfg.mpc_cfg.model_cfg.dropout = args.dropout
     cfg.mpc_cfg.model_cfg.lr = args.lr
     cfg.mpc_cfg.opt_cfg.iterations = args.iterations
     cfg.mpc_cfg.plan_hor = args.plan_hor
     cfg.mpc_cfg.num_part = args.num_part
-    param_str = (f'{args.stochasticity}_nets={args.ensemble_size}_hid={args.hid_features}'
+    param_str = (f'FIXED_LENGTH_{args.stochasticity}_nets={args.ensemble_size}_hid={args.hid_features}'
                  f'_act={args.activation}_decay={args.weight_decay}_lr={args.lr}'
-                 f'_iter={args.iterations}_hor={args.plan_hor}_part={args.num_part}')
+                 f'_iter={args.iterations}_hor={args.plan_hor}_part={args.num_part}') # TODO
 
     # Model predictive control policy
     mpc = MPC(cfg.mpc_cfg)
@@ -71,8 +70,6 @@ if __name__ == "__main__":
                         help='Activation function for dynamics model.')
     parser.add_argument('--weight_decay', type=float, default=1e-4,
                         help='Weight decay for dynamics model.')
-    parser.add_argument('--dropout', type=float, default=0,
-                        help='Dropout probability for dynamics model.')
     parser.add_argument('--lr', type=float, default=1e-3,
                         help='Learning rate for dynamics model.')
     parser.add_argument('--plan_hor', type=int, default=25,

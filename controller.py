@@ -157,15 +157,19 @@ class MPC:
                     debug_logger.log_histogram(k, v, epoch)
 
             # Stop if mean validation cross-entropy across all models stops decreasing
-            early_stopping.step(info_epoch['metrics']['xentropy/mean_val'], self.model.net, info_epoch)
+            #early_stopping.step(info_epoch['metrics']['xentropy/mean_val'], self.model.net, info_epoch)
+            early_stopping.early_stop  = epoch == 10 # TODO
 
         # Load policy with best validation loss
-        info_best = early_stopping.load_best(self.model.net)
-        metrics.update(info_best['metrics'])
+        #info_best = early_stopping.load_best(self.model.net)
+        #metrics.update(info_best['metrics']) # TODO
+        metrics.update(info_epoch['metrics'])
         metrics['time/train_time'] = time.time() - start
-        metrics['time/train_epochs'] = epoch - early_stopping.patience
+        #metrics['time/train_epochs'] = epoch - early_stopping.patience # TODO
+        metrics['time/train_epochs'] = 10
 
-        return metrics, info_best["tensors"]
+        #return metrics, info_best["tensors"] # TODO
+        return metrics, info_epoch["tensors"]
 
     def act(self, obs):
         """Returns the action that this controller would take for a single observation obs.

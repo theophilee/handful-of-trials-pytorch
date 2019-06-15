@@ -49,7 +49,8 @@ class Config:
                             "hid_features": [200, 200, 200, 200],
                             "activation": "swish",
                             "lr": 1e-3,
-                            "weight_decay": 1e-4})
+                            "weight_decay": 1e-4,
+                            "dropout": 0})
 
         opt_cfg = DotMap({"iterations": 5,
                           "popsize": 1000,

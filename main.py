@@ -28,6 +28,7 @@ def main(args):
     cfg.mpc_cfg.model_cfg.hid_features = args.hid_features
     cfg.mpc_cfg.model_cfg.activation = args.activation
     cfg.mpc_cfg.model_cfg.weight_decay = args.weight_decay
+    cfg.mpc_cfg.model_cfg.dropout = args.dropout
     cfg.mpc_cfg.model_cfg.lr = args.lr
     cfg.mpc_cfg.opt_cfg.iterations = args.iterations
     cfg.mpc_cfg.plan_hor = args.plan_hor
@@ -62,7 +63,7 @@ if __name__ == "__main__":
                         help='Random seed.')
     #parser.add_argument('--action_repeat', type=int, default=1,
     #                    help='Action repeat.')
-    parser.add_argument('--stochasticity', type=str, default='gaussian_bias',
+    parser.add_argument('--stochasticity', type=str, default='gaussian',
                         help='One of "deterministic", "gaussian", "gaussian_bias"')
     parser.add_argument('--ensemble_size', type=int, default=5,
                         help='Number of bootstrap ensemble dynamics models.')
@@ -70,6 +71,8 @@ if __name__ == "__main__":
                         help='Activation function for dynamics model.')
     parser.add_argument('--weight_decay', type=float, default=1e-4,
                         help='Weight decay for dynamics model.')
+    parser.add_argument('--dropout', type=float, default=0,
+                        help='Dropout probability for dynamics model.')
     parser.add_argument('--lr', type=float, default=1e-3,
                         help='Learning rate for dynamics model.')
     parser.add_argument('--plan_hor', type=int, default=25,

@@ -7,7 +7,7 @@ TORCH_DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.devi
 
 class BootstrapEnsemble:
     def __init__(self, stochasticity, ensemble_size, in_features, out_features, hid_features,
-                 activation, lr, weight_decay):
+                 activation, lr, weight_decay, dropout):
         """ Ensemble of bootstrap model.
 
         Args:
@@ -19,18 +19,33 @@ class BootstrapEnsemble:
             activation: activation function, one of 'relu', 'swish', 'tanh'
             lr (float): learning rate for optimizer
             weight_decay (float): weight decay for model parameters
+            dropout (float): dropout probability
         """
         self.stochasticity = stochasticity
-        self.net = self._make_network(
-            ensemble_size, in_features, out_features, hid_features, activation).to(TORCH_DEVICE)
-        self.optim = torch.optim.Adam(self.net.parameters(), lr=lr, weight_decay=weight_decay)
+        self.net = self._make_network(ensemble_size, in_features, out_features, hid_features,
+                                      activation, dropout).to(TORCH_DEVICE)
 
-    def _make_network(self, ensemble_size, in_features, out_features, hid_features, activation):
+        params, default = [], []
+        for name, param in self.net.named_parameters():
+            id = name.split('.')[-1]
+            if id == 'logvar':
+                params.append({'params': param, 'weight_decay': 0})
+            elif id == 'max_logvar':
+                params.append({'params': param, 'weight_decay': 1e-6})
+            elif id == 'min_logvar':
+                params.append({'params': param, 'weight_decay': -1e-6})
+            else:
+                default.append(param)
+        params.append({'params': default})
+        self.optim = torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
+
+    def _make_network(self, ensemble_size, in_features, out_features, hid_features, activation,
+                      dropout):
         layers = []
-
         for in_f, out_f in zip([in_features] + hid_features, hid_features):
             layers.append(BootstrapLinear(ensemble_size, in_f, out_f))
             layers.append(ACTIVATIONS[activation])
+            layers.append(nn.Dropout(p=dropout))
 
         if self.stochasticity == 'deterministic':
             output = BootstrapLinear
@@ -80,11 +95,6 @@ class BootstrapEnsemble:
             rescaled_mse = mse * inv_var
             xentropy = rescaled_mse + logvar
             loss = xentropy.mean()
-
-            if self.stochasticity == 'gaussian':
-                # Small special regularization for max and min log variance parameters
-                reg = 1e-6 * (self.net[-1].max_logvar.mean() - self.net[-1].min_logvar.mean())
-                loss += reg
 
             metrics['logvar/mean_train'] = logvar.mean()
             metrics['logvar/min_train'] = logvar.min()

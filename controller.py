@@ -101,6 +101,7 @@ class MPC:
         # Record mse and cross-entropy on new test data
         metrics = {}
         if iterative and hasattr(self.model, 'input_mean'):
+            self.model.net.eval()
             metrics.update(self.model.evaluate(X_new.to(TORCH_DEVICE), Y_new.to(TORCH_DEVICE), 'test'))
 
         # Store input statistics for normalization
@@ -129,12 +130,14 @@ class MPC:
             train_idxs_epoch = train_idxs[:, torch.randperm(train_size)]
             val_idxs_epoch = val_idxs[:, torch.randperm(val_size)]
 
+            self.model.net.train()
             train_metrics = Metrics()
             for i in range(train_batches):
                 X, Y = dataset[train_idxs_epoch[:, i*batch_size:(i+1)*batch_size]]
                 X, Y = X.to(TORCH_DEVICE), Y.to(TORCH_DEVICE)
                 train_metrics.store(self.model.update(X, Y))
 
+            self.model.net.eval()
             val_metrics = Metrics()
             for i in range(val_batches):
                 X, Y = dataset[val_idxs_epoch[:, i*batch_size:(i+1)*batch_size]]
@@ -155,6 +158,7 @@ class MPC:
 
             # Stop if mean validation cross-entropy across all models stops decreasing
             early_stopping.step(info_epoch['metrics']['xentropy/mean_val'], self.model.net, info_epoch)
+            break
 
         # Load policy with best validation loss
         info_best = early_stopping.load_best(self.model.net)
@@ -195,6 +199,7 @@ class MPC:
         if isinstance(obs, np.ndarray):
             obs = torch.from_numpy(obs).float()
 
+        self.model.net.eval()
         plans = self.optimizer.obtain_solution(obs, self._compile_score, particle_info)
 
         # Return the first action of each plan

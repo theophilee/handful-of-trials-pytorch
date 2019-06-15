@@ -71,7 +71,7 @@ if __name__ == "__main__":
                         help='Activation function for dynamics model.')
     parser.add_argument('--weight_decay', type=float, default=1e-4,
                         help='Weight decay for dynamics model.')
-    parser.add_argument('--dropout', type=float, default=0,
+    parser.add_argument('--dropout', type=float, default=0.5,
                         help='Dropout probability for dynamics model.')
     parser.add_argument('--lr', type=float, default=1e-3,
                         help='Learning rate for dynamics model.')

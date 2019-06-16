@@ -84,10 +84,10 @@ class Experiment:
             self.logger.log_scalar("time/rollout_time", (time.time() - start), step)
 
             # Train model
-            train_metrics, tensors = self.mpc.train_iteration(obs, acts, iterative=True)
+            train_metrics, weights = self.mpc.train_iteration(obs, acts)
             for k, v in train_metrics.items():
                 self.logger.log_scalar(k, v, step)
-            for k, v in tensors.items():
+            for k, v in weights.items():
                 self.logger.log_histogram(k, v, step)
 
             # Save model

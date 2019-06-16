@@ -60,7 +60,7 @@ class Experiment:
         obs, acts, lengths, _, _ = self._sample_rollouts(self.init_steps, actor=self.mpc)
 
         # Train initial model
-        self.mpc.train(obs, acts, iterative=True)
+        self.mpc.train_initial(obs, acts)
 
         # Training loop
         step = sum(lengths)
@@ -84,7 +84,7 @@ class Experiment:
             self.logger.log_scalar("time/rollout_time", (time.time() - start), step)
 
             # Train model
-            train_metrics, tensors = self.mpc.train(obs, acts, iterative=True)
+            train_metrics, tensors = self.mpc.train_iteration(obs, acts, iterative=True)
             for k, v in train_metrics.items():
                 self.logger.log_scalar(k, v, step)
             for k, v in tensors.items():

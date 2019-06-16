@@ -59,6 +59,7 @@ class Config:
         mpc_cfg = DotMap({"env": self.env,
                           "plan_hor": 25,
                           "num_part": 20,
+                          "train_epochs": 10,
                           "batches_per_epoch": 100,
                           "obs_preproc": self.obs_preproc,
                           "pred_postproc": self.pred_postproc,

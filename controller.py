@@ -16,6 +16,7 @@ class MPC:
                 .env (gym.env): Environment for which this controller will be used.
                 .plan_hor (int): The planning horizon that will be used in optimization.
                 .num_part (int): Number of particles used for propagation method.
+                .train_epochs (int): Number of epochs to train for.
                 .batches_per_epoch (int): Number of batches per training epoch.
                 .obs_preproc (func): A function which modifies observations before they
                     are passed into the model.
@@ -35,6 +36,7 @@ class MPC:
                     .activation: Activation function, one of 'relu', 'swish'.
                     .lr (float): Learning rate for optimizer.
                     .weight_decay (float): Weight decay for model parameters.
+                    .dropout (float): Dropout probability.
 
                 .opt_cfg DotMap): A DotMap of optimizer parameters.
                     .iterations (int): The number of iterations to perform during CEM
@@ -51,6 +53,7 @@ class MPC:
 
         self.plan_hor = args.plan_hor
         self.num_part = args.num_part
+        self.train_epochs = args.train_epochs
         self.batches_per_epoch = args.batches_per_epoch
         self.num_nets = args.model_cfg.ensemble_size
 
@@ -66,43 +69,26 @@ class MPC:
         # Action sequence optimizer
         self.optimizer = CEMOptimizer(args.env.action_space, self.plan_hor, **args.opt_cfg)
 
-        # Dataset to train model
-        self.X = torch.empty((0, args.model_cfg.in_features))
-        self.Y = torch.empty((0, args.model_cfg.out_features))
-
         # Bootstrap ensemble model
         self.model = BootstrapEnsemble(**args.model_cfg)
 
-    def train(self, obs, acts, train_split=0.8, iterative=True, debug_logger=None):
-        """ Train bootstrap ensemble model.
+    def train_initial(self, obs, acts, train_split=0.8, debug_logger=None):
+        """Create dataset and train bootstrap ensemble model until overfitting.
 
         Arguments:
             obs (list[2D np.ndarray]): observations
             acts (list[2D np.ndarray]): actions
             train_split (float): proportion of data used for training
-            iterative (bool): if True, add new data to training set otherwise
-                start training set from scratch
             debug_logger: if not None, plot metrics every epoch
+
+        Returns:
+            metrics (dict): scalar metrics
+            weights (dict): model weights
         """
         self.has_been_trained = True
 
         # Preprocess new data
-        X_new = [np.concatenate([self.obs_preproc(o[:-1]), a], axis=1) for o, a in zip(obs, acts)]
-        Y_new = [self.targ_proc(o[:-1], o[1:]) for o in obs]
-        X_new, Y_new = np.concatenate(X_new, axis=0), np.concatenate(Y_new, axis=0)
-        X_new, Y_new = torch.from_numpy(X_new).float(), torch.from_numpy(Y_new).float()
-
-        # Add new data to training set
-        if iterative:
-            self.X, self.Y = torch.cat((self.X, X_new)), torch.cat((self.Y, Y_new))
-        else:
-            self.X, self.Y = X_new, Y_new
-
-        # Record mse and cross-entropy on new test data
-        metrics = {}
-        if iterative and hasattr(self.model, 'input_mean'):
-            self.model.net.eval()
-            metrics.update(self.model.evaluate(X_new.to(TORCH_DEVICE), Y_new.to(TORCH_DEVICE), 'test'))
+        self.X, self.Y = self._preprocess_train_data(obs, acts)
 
         # Store input statistics for normalization
         self.model.fit_input_stats(self.X)
@@ -144,32 +130,92 @@ class MPC:
                 X, Y = X.to(TORCH_DEVICE), Y.to(TORCH_DEVICE)
                 val_metrics.store(self.model.evaluate(X, Y, 'val'))
 
-            info_epoch = {'metrics': {}, 'tensors': {}}
+            info_epoch = {'metrics': {}, 'weights': {}}
             info_epoch['metrics'].update(train_metrics.average())
             info_epoch['metrics'].update(val_metrics.average())
             weights = {name: param for name, param in self.model.net.named_parameters()}
-            info_epoch['tensors'].update(weights)
+            info_epoch['weights'].update(weights)
 
             if debug_logger is not None and epoch % 10 == 0:
                 for k, v in info_epoch['metrics'].items():
                     debug_logger.log_scalar(k, v, epoch)
-                for k, v in info_epoch['tensors'].items():
+                for k, v in info_epoch['weights'].items():
                     debug_logger.log_histogram(k, v, epoch)
 
             # Stop if mean validation cross-entropy across all models stops decreasing
-            #early_stopping.step(info_epoch['metrics']['xentropy/mean_val'], self.model.net, info_epoch)
-            early_stopping.early_stop  = epoch == 10 # TODO
+            early_stopping.step(info_epoch['metrics']['xentropy/mean_val'], self.model.net, info_epoch)
 
         # Load policy with best validation loss
-        #info_best = early_stopping.load_best(self.model.net)
-        #metrics.update(info_best['metrics']) # TODO
-        metrics.update(info_epoch['metrics'])
-        metrics['time/train_time'] = time.time() - start
-        #metrics['time/train_epochs'] = epoch - early_stopping.patience # TODO
-        metrics['time/train_epochs'] = 10
+        info_best = early_stopping.load_best(self.model.net)
+        info_best['metrics']['time/train_time'] = time.time() - start
+        info_best['metrics']['time/train_epochs'] = epoch - early_stopping.patience
 
-        #return metrics, info_best["tensors"] # TODO
-        return metrics, info_epoch["tensors"]
+        return info_best['metrics'], info_best['weights']
+
+    def train_iteration(self, obs, acts):
+        """Add new data to training set and train bootstrap ensemble model for train_epochs
+        epochs over the whole training set. To be called after train_initial() has been called
+        the first time.
+
+        Arguments:
+            obs (list[2D np.ndarray]): new observations
+            acts (list[2D np.ndarray]): new actions
+
+        Returns:
+            metrics (dict): scalar metrics
+            weights (dict): model weights
+        """
+        # Preprocess new data and add to training set
+        X_new, Y_new = self._preprocess_train_data(obs, acts)
+        self.X, self.Y = torch.cat((self.X, X_new)), torch.cat((self.Y, Y_new))
+
+        # Record mse and cross-entropy on new test data
+        metrics = {}
+        self.model.net.eval()
+        metrics.update(self.model.evaluate(X_new.to(TORCH_DEVICE), Y_new.to(TORCH_DEVICE), 'test'))
+
+        # Store input statistics for normalization
+        self.model.fit_input_stats(self.X)
+
+        dataset = TensorDataset(self.X, self.Y)
+        batch_size = int(len(dataset) / self.batches_per_epoch)
+
+        # Training loop
+        start = time.time()
+        for _ in range(self.train_epochs):
+            idxs = torch.stack([torch.randperm(len(dataset)) for _ in range(self.num_nets)])
+
+            self.model.net.train()
+            epoch_metrics = Metrics()
+            for i in range(self.batches_per_epoch):
+                X, Y = dataset[idxs[:, i * batch_size:(i + 1) * batch_size]]
+                X, Y = X.to(TORCH_DEVICE), Y.to(TORCH_DEVICE)
+                epoch_metrics.store(self.model.update(X, Y))
+
+        metrics.update(epoch_metrics.average())
+        metrics['time/train_time'] = time.time() - start
+        metrics['time/train_epochs'] = self.train_epochs
+
+        weights = {name: param for name, param in self.model.net.named_parameters()}
+
+        return metrics, weights
+
+    def _preprocess_train_data(self, obs, acts):
+        """ Preprocess observations and actions for dynamics model training set.
+
+        Arguments:
+            obs (list[2D np.ndarray]): observations
+            acts (list[2D np.ndarray]): actions
+
+        Returns:
+            X (2D torch.Tensor): inputs
+            Y (2D torch.Tensor): targets
+        """
+        X = [np.concatenate([self.obs_preproc(o[:-1]), a], axis=1) for o, a in zip(obs, acts)]
+        Y = [self.targ_proc(o[:-1], o[1:]) for o in obs]
+        X, Y = np.concatenate(X, axis=0), np.concatenate(Y, axis=0)
+        X, Y = torch.from_numpy(X).float(), torch.from_numpy(Y).float()
+        return X, Y
 
     def act(self, obs):
         """Returns the action that this controller would take for a single observation obs.

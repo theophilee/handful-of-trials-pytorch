@@ -5,6 +5,14 @@ ACTIVATIONS = {'relu': nn.ReLU(), 'swish': Swish(), 'tanh': nn.Tanh()}
 TORCH_DEVICE = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
 
+def log_statistics(dict, tensor, key):
+    dict[key + '_mean'] = tensor.mean()
+    dict[key + '_min'] = tensor.min()
+    dict[key + '_max'] = tensor.max()
+    dict[key + '_std'] = tensor.std()
+    dict[key + '_median'] = tensor.median()
+
+
 class BootstrapEnsemble:
     def __init__(self, stochasticity, ensemble_size, in_features, out_features, hid_features,
                  activation, lr, weight_decay, dropout):
@@ -68,7 +76,7 @@ class BootstrapEnsemble:
             return self.predict(input)
         else:
             mean, logvar = self.predict(input)
-            return mean + torch.randn_like(mean, device=TORCH_DEVICE) * logvar.exp().sqrt()
+            return mean + torch.randn_like(mean, device=input.device) * logvar.exp().sqrt()
 
     def update(self, input, targ):
         metrics = {}
@@ -96,26 +104,11 @@ class BootstrapEnsemble:
                 reg = 1e-6 * (self.net[-1].max_logvar.mean() - self.net[-1].min_logvar.mean())
                 loss += reg
 
-            metrics['logvar/mean_train'] = logvar.mean()
-            metrics['logvar/min_train'] = logvar.min()
-            metrics['logvar/max_train'] = logvar.max()
-            metrics['logvar/std_train'] = logvar.std()
-            metrics['logvar/median_train'] = logvar.median()
+            log_statistics(metrics, logvar, 'logvar/train')
+            log_statistics(metrics, rescaled_mse, 'rescaled_mse/train')
 
-            metrics['rescaled_mse/mean_train'] = rescaled_mse.mean()
-            metrics['rescaled_mse/min_train'] = rescaled_mse.min()
-            metrics['rescaled_mse/max_train'] = rescaled_mse.max()
-            metrics['rescaled_mse/std_train'] = rescaled_mse.std()
-            metrics['rescaled_mse/median_train'] = rescaled_mse.median()
-
-        mse = mse.cpu().detach()
-        xentropy = xentropy.cpu().detach()
-        metrics['mse/mean_train'] = mse.mean()
-        metrics['mse/min_train'] = mse.min()
-        metrics['mse/max_train'] = mse.max()
-        metrics['mse/std_train'] = mse.std()
-        metrics['mse/median_train'] = mse.median()
-        metrics['xentropy/mean_train'] = xentropy.mean()
+        log_statistics(metrics, mse, 'mse/train')
+        log_statistics(metrics, xentropy, 'xentropy/train')
 
         # Take a gradient step
         self.optim.zero_grad()
@@ -124,7 +117,8 @@ class BootstrapEnsemble:
 
         return metrics
 
-    def evaluate(self, input, targ, tag):
+    @torch.no_grad()
+    def evaluate_val(self, input, targ):
         metrics = {}
 
         if self.stochasticity == 'deterministic':
@@ -139,25 +133,29 @@ class BootstrapEnsemble:
             rescaled_mse = mse * inv_var
             xentropy = rescaled_mse + logvar
 
-            metrics[f'logvar/mean_{tag}'] = logvar.mean()
-            metrics[f'logvar/min_{tag}'] = logvar.min()
-            metrics[f'logvar/max_{tag}'] = logvar.max()
-            metrics[f'logvar/std_{tag}'] = logvar.std()
-            metrics[f'logvar/median_{tag}'] = logvar.median()
+            log_statistics(metrics, logvar, 'logvar/val')
+            log_statistics(metrics, rescaled_mse, 'rescaled_mse/val')
 
-            metrics[f'rescaled_mse/mean_{tag}'] = rescaled_mse.mean()
-            metrics[f'rescaled_mse/min_{tag}'] = rescaled_mse.min()
-            metrics[f'rescaled_mse/max_{tag}'] = rescaled_mse.max()
-            metrics[f'rescaled_mse/std_{tag}'] = rescaled_mse.std()
-            metrics[f'rescaled_mse/median_{tag}'] = rescaled_mse.median()
+        log_statistics(metrics, mse, 'mse/val')
+        log_statistics(metrics, xentropy, 'xentropy/val')
 
-        mse = mse.cpu().detach()
-        xentropy = xentropy.cpu().detach()
-        metrics[f'mse/mean_{tag}'] = mse.mean()
-        metrics[f'mse/min_{tag}'] = mse.min()
-        metrics[f'mse/max_{tag}'] = mse.max()
-        metrics[f'mse/std_{tag}'] = mse.std()
-        metrics[f'mse/median_{tag}'] = mse.median()
-        metrics[f'xentropy/mean_{tag}'] = xentropy.mean()
+        return metrics
+
+    @torch.no_grad()
+    def evaluate_test(self, input, targ):
+        metrics = {}
+
+        if self.stochasticity == 'deterministic':
+            mean = self.predict(input)
+
+        else:
+            mean, logvar = self.predict(input)
+            sample = mean + torch.randn_like(mean, device=input.device) * logvar.exp().sqrt()
+
+            log_statistics(metrics, (sample - targ) ** 2, 'test/mse_sample_individual')
+            log_statistics(metrics, (sample.mean(dim=0) - targ) ** 2, 'test/mse_sample_ensemble')
+
+        log_statistics(metrics, (mean - targ) ** 2, 'test/mse_mean_individual')
+        log_statistics(metrics, (mean.mean(dim=0) - targ) ** 2, 'test/mse_mean_ensemble')
 
         return metrics

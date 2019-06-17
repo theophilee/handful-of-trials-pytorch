@@ -128,7 +128,7 @@ class MPC:
             for i in range(val_batches):
                 X, Y = dataset[val_idxs_epoch[:, i*batch_size:(i+1)*batch_size]]
                 X, Y = X.to(TORCH_DEVICE), Y.to(TORCH_DEVICE)
-                val_metrics.store(self.model.evaluate(X, Y, 'val'))
+                val_metrics.store(self.model.evaluate_val(X, Y))
 
             info_epoch = {'metrics': {}, 'weights': {}}
             info_epoch['metrics'].update(train_metrics.average())
@@ -143,7 +143,7 @@ class MPC:
                     debug_logger.log_histogram(k, v, epoch)
 
             # Stop if mean validation cross-entropy across all models stops decreasing
-            early_stopping.step(info_epoch['metrics']['xentropy/mean_val'], self.model.net, info_epoch)
+            early_stopping.step(info_epoch['metrics']['xentropy/val_mean'], self.model.net, info_epoch)
 
         # Load policy with best validation loss
         info_best = early_stopping.load_best(self.model.net)
@@ -152,7 +152,7 @@ class MPC:
 
         return info_best['metrics'], info_best['weights']
 
-    def train_iteration(self, obs, acts, train_split=0.8): # TODO
+    def train_iteration(self, obs, acts):
         """Add new data to training set and train bootstrap ensemble model for train_epochs
         epochs over the whole training set. To be called after train_initial() has been called
         the first time.
@@ -172,27 +172,22 @@ class MPC:
         # Record mse and cross-entropy on new test data
         metrics = {}
         self.model.net.eval()
-        metrics.update(self.model.evaluate(X_new.to(TORCH_DEVICE), Y_new.to(TORCH_DEVICE), 'test'))
-        metrics.update(self._evaluate_predictions(obs, acts))
+        metrics.update(self.model.evaluate_test(X_new.to(TORCH_DEVICE), Y_new.to(TORCH_DEVICE)))
 
         # Store input statistics for normalization
         self.model.fit_input_stats(self.X)
 
         dataset = TensorDataset(self.X, self.Y)
         batch_size = int(len(dataset) / self.batches_per_epoch)
-        train_size = int(train_split * len(dataset)) # TODO
-        train_batches = int(train_split * self.batches_per_epoch) # TODO
 
         # Training loop
         start = time.time()
-        for _ in range(self.train_epochs):
-            #idxs = torch.stack([torch.randperm(len(dataset)) for _ in range(self.num_nets)]) # TODO
-            idxs = torch.stack([torch.randperm(len(dataset))[:train_size] for _ in range(self.num_nets)])
+        for epoch in range(self.train_epochs):
+            idxs = torch.stack([torch.randperm(len(dataset)) for _ in range(self.num_nets)])
 
             self.model.net.train()
             epoch_metrics = Metrics()
-            for i in range(train_batches):
-            #for i in range(self.batches_per_epoch): # TODO
+            for i in range(self.batches_per_epoch):
                 X, Y = dataset[idxs[:, i * batch_size:(i + 1) * batch_size]]
                 X, Y = X.to(TORCH_DEVICE), Y.to(TORCH_DEVICE)
                 epoch_metrics.store(self.model.update(X, Y))
@@ -221,35 +216,6 @@ class MPC:
         X, Y = np.concatenate(X, axis=0), np.concatenate(Y, axis=0)
         X, Y = torch.from_numpy(X).float(), torch.from_numpy(Y).float()
         return X, Y
-
-    def _evaluate_predictions(self, obs, acts):
-        """Evaluate prediction methods.
-
-        Arguments:
-            obs (list[2D np.ndarray]): observations
-            acts (list[2D np.ndarray]): actions
-
-        Returns:
-            metrics (dict): scalar metrics
-        """
-        cur_obs = numpy_to_device(np.concatenate([o[:-1] for o in obs], axis=0))
-        acts = numpy_to_device(np.concatenate(acts, axis=0))
-        next_obs = numpy_to_device(np.concatenate([o[1:] for o in obs], axis=0))
-
-        mse_average = ((self._predict_next_obs_average(cur_obs, acts) - next_obs) ** 2).cpu()
-        mse_divide = ((self._predict_next_obs_divide(cur_obs, acts) - next_obs) ** 2).cpu()
-
-        metrics = {'predictions/mse_average_mean': mse_average.mean(),
-                   'predictions/mse_average_min': mse_average.min(),
-                   'predictions/mse_average_max': mse_average.max(),
-                   'predictions/mse_average_std': mse_average.std(),
-                   'predictions/mse_average_median': mse_average.median(),
-                   'predictions/mse_divide_mean': mse_divide.mean(),
-                   'predictions/mse_divide_min': mse_divide.min(),
-                   'predictions/mse_divide_max': mse_divide.max(),
-                   'predictions/mse_divide_std': mse_divide.std(),
-                   'predictions/mse_divide_median': mse_divide.median()}
-        return metrics
 
     def act(self, obs):
         """Return the action that this controller would take for a single observation obs.
@@ -369,11 +335,8 @@ class MPC:
                 # Measure diversity among particles by observation std dev
                 if particle_info is not None:
                     obs_std = next_obs.view(-1, self.num_part, self.obs_features).std(dim=1).cpu()
-                    particle_info.store({'particle/obs_std_mean': obs_std.mean(),
-                                         'particle/obs_std_min': obs_std.min(),
-                                         'particle/obs_std_max': obs_std.max(),
-                                         'particle/obs_std_std': obs_std.std(),
-                                         'particle/obs_std_median': obs_std.median()})
+                    metrics = {}; log_statistics(metrics, obs_std, 'particle/obs_std')
+                    particle_info.store(metrics)
 
                 # Compute rewards and done flags
                 rewards, dones = self.get_reward(obs, acts, next_obs)
@@ -389,11 +352,8 @@ class MPC:
         # Measure diversity among particles by score std dev
         if particle_info is not None:
             score_std = scores.std(dim=-1).cpu()
-            particle_info.store({'particle/score_std_mean': score_std.mean(),
-                                 'particle/score_std_min': score_std.min(),
-                                 'particle/score_std_max': score_std.max(),
-                                 'particle/score_std_std': score_std.std(),
-                                 'particle/score_std_median': score_std.median()})
+            metrics = {};  log_statistics(metrics, score_std, 'particle/score_std')
+            particle_info.store(metrics)
 
         # Average score over particles
         return scores.mean(dim=-1).cpu()

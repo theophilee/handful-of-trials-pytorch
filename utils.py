@@ -25,6 +25,14 @@ def numpy_from_device(tensor):
     return tensor.cpu().detach().numpy()
 
 
+def log_statistics(dict, tensor, key):
+    dict[key + '_mean'] = tensor.mean()
+    dict[key + '_min'] = tensor.min()
+    dict[key + '_max'] = tensor.max()
+    dict[key + '_std'] = tensor.std()
+    dict[key + '_median'] = tensor.median()
+
+
 class Logger:
     """Logging with TensorboardX.
     """

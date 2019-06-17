@@ -33,7 +33,7 @@ class MPC:
                     .in_features (int): Size of each input sample.
                     .out_features (int): Size of each output sample.
                     .hid_features iterable(int): Size of each hidden layer, can be empty.
-                    .activation: Activation function, one of 'relu', 'swish'.
+                    .activation: Activation function, one of 'relu', 'swish', 'tanh'.
                     .lr (float): Learning rate for optimizer.
                     .weight_decay (float): Weight decay for model parameters.
                     .dropout (float): Dropout probability.
@@ -173,6 +173,7 @@ class MPC:
         metrics = {}
         self.model.net.eval()
         metrics.update(self.model.evaluate(X_new.to(TORCH_DEVICE), Y_new.to(TORCH_DEVICE), 'test'))
+        metrics.update(self._evaluate_predictions(obs, acts))
 
         # Store input statistics for normalization
         self.model.fit_input_stats(self.X)
@@ -201,7 +202,7 @@ class MPC:
         return metrics, weights
 
     def _preprocess_train_data(self, obs, acts):
-        """ Preprocess observations and actions for dynamics model training set.
+        """Preprocess observations and actions for dynamics model training set.
 
         Arguments:
             obs (list[2D np.ndarray]): observations
@@ -217,8 +218,37 @@ class MPC:
         X, Y = torch.from_numpy(X).float(), torch.from_numpy(Y).float()
         return X, Y
 
+    def _evaluate_predictions(self, obs, acts):
+        """Evaluate prediction methods.
+
+        Arguments:
+            obs (list[2D np.ndarray]): observations
+            acts (list[2D np.ndarray]): actions
+
+        Returns:
+            metrics (dict): scalar metrics
+        """
+        cur_obs = numpy_to_device(np.concatenate([o[:-1] for o in obs], axis=0))
+        acts = numpy_to_device(np.concatenate(acts, axis=0))
+        next_obs = numpy_to_device(np.concatenate([o[1:] for o in obs], axis=0))
+
+        mse_average = ((self._predict_next_obs_average(cur_obs, acts) - next_obs) ** 2).cpu()
+        mse_divide = ((self._predict_next_obs_divide(cur_obs, acts) - next_obs) ** 2).cpu()
+
+        metrics = {'predictions/mse_average_mean': mse_average.mean(),
+                   'predictions/mse_average_min': mse_average.min(),
+                   'predictions/mse_average_max': mse_average.max(),
+                   'predictions/mse_average_std': mse_average.std(),
+                   'predictions/mse_average_median': mse_average.median(),
+                   'predictions/mse_divide_mean': mse_divide.mean(),
+                   'predictions/mse_divide_min': mse_divide.min(),
+                   'predictions/mse_divide_max': mse_divide.max(),
+                   'predictions/mse_divide_std': mse_divide.std(),
+                   'predictions/mse_divide_median': mse_divide.median()}
+        return metrics
+
     def act(self, obs):
-        """Returns the action that this controller would take for a single observation obs.
+        """Return the action that this controller would take for a single observation obs.
 
         Arguments:
             obs (1D numpy.ndarray): Observation.
@@ -235,7 +265,7 @@ class MPC:
         return act, particle_info.average()
 
     def act_parallel(self, obs, particle_info=None):
-        """Returns the action that this controller would take for each of the observations
+        """Return the action that this controller would take for each of the observations
         in obs. Used to sample multiple rollouts in parallel.
 
         Arguments:
@@ -330,12 +360,11 @@ class MPC:
 
             for t in range(self.plan_hor):
                 acts = plans[:, t]
-                #next_obs = self._predict_next_obs_divide(obs, acts) # TODO
-                next_obs = self._predict_next_obs_average(obs, acts)
+                next_obs = self._predict_next_obs_divide(obs, acts)
 
                 # Measure diversity among particles by observation std dev
                 if particle_info is not None:
-                    obs_std = next_obs.view(-1, self.num_part, self.obs_features).std(dim=1).mean(dim=0).cpu()
+                    obs_std = next_obs.view(-1, self.num_part, self.obs_features).std(dim=1).cpu()
                     particle_info.store({'particle/obs_std_mean': obs_std.mean(),
                                          'particle/obs_std_min': obs_std.min(),
                                          'particle/obs_std_max': obs_std.max(),
@@ -370,8 +399,9 @@ class MPC:
 
         Arguments:
             obs (2D torch.Tensor): Observations.
+            acts (2D torch.Tensor): Actions.
 
-        Returns: Actions (2D torch.Tensor).
+        Returns: Next observations (2D torch.Tensor).
         """
         # Preprocess observations
         proc_obs = self.obs_preproc(obs)
@@ -387,10 +417,11 @@ class MPC:
     def _predict_next_obs_divide(self, obs, acts):
         """Predict next observation by dividing predictions among models in ensemble.
 
-        Arguments:
+         Arguments:
             obs (2D torch.Tensor): Observations.
+            acts (2D torch.Tensor): Actions.
 
-        Returns: Actions (2D torch.Tensor).
+        Returns: Next observations (2D torch.Tensor).
         """
         # Preprocess observations
         proc_obs = self.obs_preproc(obs)

@@ -152,7 +152,7 @@ class MPC:
 
         return info_best['metrics'], info_best['weights']
 
-    def train_iteration(self, obs, acts):
+    def train_iteration(self, obs, acts, train_split=0.8): # TODO
         """Add new data to training set and train bootstrap ensemble model for train_epochs
         epochs over the whole training set. To be called after train_initial() has been called
         the first time.
@@ -180,15 +180,19 @@ class MPC:
 
         dataset = TensorDataset(self.X, self.Y)
         batch_size = int(len(dataset) / self.batches_per_epoch)
+        train_size = int(train_split * len(dataset)) # TODO
+        train_batches = int(train_split * self.batches_per_epoch) # TODO
 
         # Training loop
         start = time.time()
         for _ in range(self.train_epochs):
-            idxs = torch.stack([torch.randperm(len(dataset)) for _ in range(self.num_nets)])
+            #idxs = torch.stack([torch.randperm(len(dataset)) for _ in range(self.num_nets)]) # TODO
+            idxs = torch.stack([torch.randperm(len(dataset))[:train_size] for _ in range(self.num_nets)])
 
             self.model.net.train()
             epoch_metrics = Metrics()
-            for i in range(self.batches_per_epoch):
+            for i in range(train_batches):
+            #for i in range(self.batches_per_epoch): # TODO
                 X, Y = dataset[idxs[:, i * batch_size:(i + 1) * batch_size]]
                 X, Y = X.to(TORCH_DEVICE), Y.to(TORCH_DEVICE)
                 epoch_metrics.store(self.model.update(X, Y))

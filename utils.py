@@ -27,6 +27,8 @@ def numpy_from_device(tensor):
 
 def log_statistics(dict, tensor, key):
     dict[key + '_mean'] = tensor.mean()
+    dict[key + '_max'] = tensor.max()
+    dict[key + '_std'] = tensor.std()
     dict[key + '_median'] = tensor.median()
 
 

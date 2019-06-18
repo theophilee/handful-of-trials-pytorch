@@ -43,7 +43,7 @@ def main(args):
     policy = Policy(**cfg.policy_cfg)
 
     # Run experiment
-    exp = Experiment(mpc, policy, args.env, param_str, args.logdir, args.savedir, cfg.exp_cfg)
+    exp = Experiment(mpc, policy, args.env, param_str, args.logdir, args.savedir, args.load, cfg.exp_cfg)
     exp.run_mpc_baseline()
     #exp.run_inner_loop_debug()
     #exp.run_behavior_cloning_debug()
@@ -83,6 +83,8 @@ if __name__ == "__main__":
                         help='Number of iterations to perform during CEM optimization.')
     parser.add_argument('--expert_demos', default=False, type=lambda x: (str(x).lower() == 'true'),
                         help='If True, add expert demonstrations to dynamics model training set.')
+    parser.add_argument('--load', default=False, type=lambda x: (str(x).lower() == 'true'),
+                        help='If True, load mpc controller from previous experiment.')
     args = parser.parse_args()
 
     main(args)

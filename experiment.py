@@ -13,7 +13,7 @@ def print_rollout_stats(obs, acts, length, score):
 
 
 class Experiment:
-    def __init__(self, mpc, policy, env_str, param_str, logdir, savedir, args):
+    def __init__(self, mpc, policy, env_str, param_str, logdir, savedir, load, args):
         """Experiment.
 
         Arguments:
@@ -23,8 +23,9 @@ class Experiment:
                 imitation learning on model-based controller.
             env_str (str): String descriptor of environment.
             param_str (str): String descriptor of experiment hyper-parameters.
-            logdir: Log directory for Tensorboard.
-            savedir: Save directory.
+            logdir (str): Log directory for Tensorboard.
+            savedir (str): Save directory.
+            load (bool): If True, load mpc.
             args (DotMap): A DotMap of experiment parameters.
                 .env (OpenAI gym environment): The environment for this agent.
                 .expert_demos (bool): If True, add expert demonstrations to
@@ -52,6 +53,10 @@ class Experiment:
 
         # TensorboardX summary writer
         self.logger = Logger(os.path.join(logdir, f"{env_str}_{param_str}"))
+
+        # Load mpc
+        if load:
+            self.mpc = torch.load(os.path.join(self.savedir, 'mpc.pth'))
 
     def run_mpc_baseline(self):
         """Model predictive control baseline, no parameterized policy.

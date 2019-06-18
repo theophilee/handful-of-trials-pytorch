@@ -43,8 +43,8 @@ def main(args):
     policy = Policy(**cfg.policy_cfg)
 
     # Run experiment
-    exp = Experiment(mpc, policy, args.env, param_str, args.logdir, args.savedir, args.load, cfg.exp_cfg)
-    exp.run_mpc_baseline()
+    exp = Experiment(mpc, policy, args.env, param_str, args.logdir, args.savedir, cfg.exp_cfg)
+    exp.run_mpc_baseline(args.load)
     #exp.run_inner_loop_debug()
     #exp.run_behavior_cloning_debug()
     #exp.run_train_model_debug()

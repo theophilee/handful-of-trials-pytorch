@@ -13,7 +13,7 @@ def print_rollout_stats(obs, acts, length, score):
 
 
 class Experiment:
-    def __init__(self, mpc, policy, env_str, param_str, logdir, savedir, load, args):
+    def __init__(self, mpc, policy, env_str, param_str, logdir, savedir, args):
         """Experiment.
 
         Arguments:
@@ -25,7 +25,6 @@ class Experiment:
             param_str (str): String descriptor of experiment hyper-parameters.
             logdir (str): Log directory for Tensorboard.
             savedir (str): Save directory.
-            load (bool): If True, load mpc.
             args (DotMap): A DotMap of experiment parameters.
                 .env (OpenAI gym environment): The environment for this agent.
                 .expert_demos (bool): If True, add expert demonstrations to
@@ -54,21 +53,21 @@ class Experiment:
         # TensorboardX summary writer
         self.logger = Logger(os.path.join(logdir, f"{env_str}_{param_str}"))
 
-        # Load mpc
+    def run_mpc_baseline(self, load):
+        """Model predictive control baseline, no parameterized policy.
+        """
         if load:
             self.mpc = torch.load(os.path.join(self.savedir, 'mpc.pth'))
 
-    def run_mpc_baseline(self):
-        """Model predictive control baseline, no parameterized policy.
-        """
-        # Initial random rollouts
-        obs, acts, lengths, _, _ = self._sample_rollouts(self.init_steps, actor=self.mpc)
+        else:
+            # Initial random rollouts
+            obs, acts, lengths, _, _ = self._sample_rollouts(self.init_steps, actor=self.mpc)
 
-        # Train initial model
-        self.mpc.train_initial(obs, acts)
+            # Train initial model
+            self.mpc.train_initial(obs, acts)
 
         # Training loop
-        step = sum(lengths)
+        step = self.mpc.X.shape[0]
         while step < self.total_steps:
             # Sample rollouts
             start = time.time()

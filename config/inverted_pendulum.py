@@ -33,7 +33,7 @@ class Config:
         exp_cfg = DotMap({"env": self.env,
                           "expert_demos": False,
                           "init_steps": 5000,
-                          "total_steps": 100000,
+                          "total_steps": 50000,
                           "train_freq": 1000,
                           "imaginary_steps": 5000})
 

@@ -33,7 +33,7 @@ def main(args):
     cfg.mpc_cfg.plan_hor = args.plan_hor
     cfg.mpc_cfg.num_part = args.num_part
     param_str = (f'{args.stochasticity}_nets={args.ensemble_size}_hid={args.hid_features}'
-                 f'_act={args.activation}_decay={args.weight_decay}_lr={args.lr}'
+                 f'_act={args.activation}_decay={args.weight_decay}_lr={args.lr}_seed={args.seed}'
                  f'_iter={args.iterations}_hor={args.plan_hor}_part={args.num_part}')
 
     # Model predictive control policy
@@ -44,25 +44,26 @@ def main(args):
 
     # Run experiment
     exp = Experiment(mpc, policy, args.env, param_str, args.logdir, args.savedir, cfg.exp_cfg)
-    exp.run_mpc_baseline(args.load)
-    #exp.run_inner_loop_debug()
-    #exp.run_behavior_cloning_debug()
-    #exp.run_train_model_debug()
+    #exp.mpc_baseline(args.load)
+    #exp.debug_behavior_cloning()
+    #exp.debug_train_model()
+    #exp.debug_experiment()
+    exp.debug_inner_loop()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env', type=str, default='half_cheetah',
+    parser.add_argument('--env', type=str, default='cartpole',
                         help='Env name: one of {}.'.format(ALLOWED_ENVS))
     parser.add_argument('--logdir', type=str, default='runs/main',
                         help='Log directory for Tensorboard.')
     parser.add_argument('--savedir', type=str, default='save/main',
                         help='Save directory.')
-    parser.add_argument('--seed', type=int, default=0,
+    parser.add_argument('--seed', type=int, default=2,
                         help='Random seed.')
     #parser.add_argument('--action_repeat', type=int, default=1,
     #                    help='Action repeat.')
-    parser.add_argument('--stochasticity', type=str, default='gaussian',
+    parser.add_argument('--stochasticity', type=str, default='gaussian_bias',
                         help='One of "deterministic", "gaussian", "gaussian_bias"')
     parser.add_argument('--ensemble_size', type=int, default=5,
                         help='Number of bootstrap ensemble dynamics models.')

@@ -351,8 +351,9 @@ class MPC:
 
         # Measure diversity among particles by score std dev
         if particle_info is not None:
-            score_std = scores.std(dim=-1).cpu()
-            metrics = {};  log_statistics(metrics, score_std, 'particle/score_std')
+            metrics = {}
+            log_statistics(metrics, scores.mean(dim=-1).cpu(), 'particle/score_mean')
+            log_statistics(metrics, scores.std(dim=-1).cpu(), 'particle/score_std')
             particle_info.store(metrics)
 
         # Average score over particles

@@ -2,8 +2,7 @@
 
 trap "kill 0" EXIT
 
-CUDA_VISIBLE_DEVICES=0 python main.py --env cartpole &
-CUDA_VISIBLE_DEVICES=1 python main.py --env inverted_pendulum &
-CUDA_VISIBLE_DEVICES=2 python main.py --env half_cheetah &
+CUDA_VISIBLE_DEVICES=1 python main.py --env cartpole &
+#CUDA_VISIBLE_DEVICES=2 python main.py --env half_cheetah &
 
 wait

@@ -53,15 +53,24 @@ class Experiment:
         # TensorboardX summary writer
         self.logger = Logger(os.path.join(logdir, f"{env_str}_{param_str}"))
 
-    def mpc_baseline(self, load):
+    def mpc_baseline(self, load_controller, expert_demos):
         """Model predictive control baseline, no parameterized policy.
+
+        Arguments:
+            load_controller (bool): If True, load mpc controller.
+            expert_demos (bool): If True, initialize training set with extra expert demonstrations.
         """
-        if load:
+        if load_controller:
             self.mpc = torch.load(os.path.join(self.savedir, 'mpc.pth'))
 
         else:
             # Initial random rollouts
             obs, acts, lengths, _, _ = self._sample_rollouts(self.init_steps, actor=self.mpc)
+
+            if expert_demos:
+                obs_expert, acts_expert = self._load_expert_demos()
+                obs = obs + tuple(o for o in obs_expert)
+                acts = acts + tuple(a for a in acts_expert)
 
             # Train initial model
             self.mpc.train_initial(obs, acts)
@@ -183,7 +192,7 @@ class Experiment:
         obs, acts, _, _, _ = self._sample_rollouts(self.imaginary_steps, actor=self.mpc)
         obs, acts = np.concatenate([o[:-1] for o in obs]), np.concatenate(acts)
         np.save(os.path.join(self.savedir, 'obs'), obs)
-        np.save(os.path.join(self.savedir, 'acts'), acts)
+        np.save(os.path.join(self.savedir, 'act'), acts)
         #obs = np.load(os.path.join(self.savedir, 'obs.npy'))
         #acts = np.load(os.path.join(self.savedir, 'acts.npy'))
         self.policy.train(obs, acts, iterative=False)
@@ -203,9 +212,9 @@ class Experiment:
         print('Learned dynamics training...')
         obs, acts = self.mpc.sample_imaginary_rollouts(1, self.imaginary_steps, actor=self.mpc)
         np.save(os.path.join(self.savedir, 'obs_imagined'), obs)
-        np.save(os.path.join(self.savedir, 'acts_imagined'), acts)
+        np.save(os.path.join(self.savedir, 'act_imagined'), acts)
         #obs = np.load(os.path.join(self.savedir, 'obs_imagined.npy'))
-        #acts = np.load(os.path.join(self.savedir, 'acts_imagined.npy'))
+        #acts = np.load(os.path.join(self.savedir, 'act_imagined.npy'))
         self.policy.train(obs, acts, iterative=False)
 
         # Evaluate policy
@@ -217,6 +226,14 @@ class Experiment:
         obs = np.load(os.path.join(path, 'obs.npy'))
         acts = np.load(os.path.join(path, 'act.npy'))
         return obs, acts
+
+    def collect_expert_demos(self):
+        path = f'/home/theophile/Documents/research/handful-of-trials-pytorch/save/main/{self.env_str}/gaussian_bias'
+        self.mpc = torch.load(os.path.join(path, 'mpc.pth'))
+
+        obs, acts, _, _, _ = self._sample_rollouts(self.imaginary_steps, actor=self.mpc)
+        np.save(os.path.join(path, 'obs.npy'), obs)
+        np.save(os.path.join(path, 'act.npy'), acts)
 
     def _sample_rollouts(self, max_steps, actor):
         rollouts, steps = [], 0

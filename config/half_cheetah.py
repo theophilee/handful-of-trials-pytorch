@@ -39,9 +39,9 @@ class Config:
         exp_cfg = DotMap({"env": self.env,
                           "expert_demos": False,
                           "init_steps": 5000,
-                          "total_steps": 50000,
+                          "total_steps": 70000,
                           "train_freq": 1000,
-                          "imaginary_steps": 5000})
+                          "imaginary_steps": 20000})
 
         model_cfg = DotMap({"ensemble_size": 5,
                             "in_features": self.obs_features_preprocessed + self.act_features,

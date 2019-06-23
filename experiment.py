@@ -4,6 +4,7 @@ import numpy as np
 import torch
 
 from utils import Logger, Metrics
+from TD3 import TD3
 
 
 def print_rollout_stats(obs, acts, length, score):
@@ -179,43 +180,65 @@ class Experiment:
 
     def debug_inner_loop(self):
         # Load pretrained model
-        path = f'/home/theophile/Documents/research/handful-of-trials-pytorch/save/main/{self.env_str}/gaussian_bias/mpc.pth'
-        self.mpc = torch.load(path)
+        mpc_path = f'/home/theophile/Documents/research/handful-of-trials-pytorch/save/main/{self.env_str}/gaussian_bias/mpc.pth'
+        self.mpc = torch.load(mpc_path)
+
+        #expert = TD3(self.env.observation_space.shape[0], self.env.action_space.shape[0], self.env.action_space.high[0])
+        #expert.load('MyHalfCheetah-v2', '/home/theophile/Documents/research/handful-of-trials-pytorch/save/TD3')
 
         # Evaluate pretrained expert
         #print('Expert performance')
+        #self._sample_rollout(actor=expert, verbose=True)
         #self._sample_rollout(actor=self.mpc, verbose=True)
 
         # Train paramaterized policy by behavior cloning under true dynamics
-        """
-        print('True dynamics training...')
+        print('True dynamics BC training...')
         obs, acts, _, _, _ = self._sample_rollouts(self.imaginary_steps, actor=self.mpc)
+        #obs, acts, _, _, _ = self._sample_rollouts(self.imaginary_steps, actor=expert)
+        rollouts_path = f'/home/theophile/Documents/research/handful-of-trials-pytorch/save/expert_demonstrations/{self.env_str}'
+        np.save(os.path.join(rollouts_path, 'obs'), obs)
+        np.save(os.path.join(rollouts_path, 'act'), acts)
+        #obs = np.load(os.path.join(rollouts_path, 'obs.npy'))
+        #acts = np.load(os.path.join(rollouts_path, 'act.npy'))
         obs, acts = np.concatenate([o[:-1] for o in obs]), np.concatenate(acts)
-        np.save(os.path.join(self.savedir, 'obs'), obs)
-        np.save(os.path.join(self.savedir, 'act'), acts)
-        #obs = np.load(os.path.join(self.savedir, 'obs.npy'))
-        #acts = np.load(os.path.join(self.savedir, 'acts.npy'))
         self.policy.train(obs, acts, iterative=False)
-        """
 
         # Train parameterized policy by DAgger under true dynamics
-        #obs = np.load(os.path.join(self.savedir, 'obs.npy'))
-        #acts = np.load(os.path.join(self.savedir, 'act.npy'))
-        #metrics = self.policy.train(obs, acts, iterative=True)
-        #for _ in range(10):
-        #    obs, acts, length, score = self._sample_rollout(actor=self.policy)
-        #    print_rollout_stats(obs, acts, length, score)
-        #    labels = self.mpc.act_parallel(obs)
-        #    self.policy.train(obs, labels, iterative=True)
+        """
+        print('True dynamics DAgger training...')
+        obs, acts, _, _, _ = self._sample_rollout(actor=expert)
+        #obs, acts, _, _, _ = self._sample_rollout(actor=self.mpc)
+        self.policy.train(obs[:-1], acts, iterative=True)
+        for _ in range(10):
+            obs, _, _, _, _ = self._sample_rollout(actor=self.policy, verbose=True)
+            labels = expert.act_parallel(obs[:-1])
+            #labels = self.mpc.act_parallel(obs[:-1])
+            self.policy.train(obs[:-1], labels, iterative=True)
+        """
 
         # Train paramaterized policy by behavior cloning under learned dynamics
-        print('Learned dynamics training...')
-        obs, acts = self.mpc.sample_imaginary_rollouts(1, self.imaginary_steps, actor=self.mpc)
-        np.save(os.path.join(self.savedir, 'obs_imagined'), obs)
-        np.save(os.path.join(self.savedir, 'act_imagined'), acts)
+        """
+        print('Learned dynamics BC training...')
+        #obs, acts = self.mpc.sample_imaginary_rollouts(1, self.imaginary_steps, actor=self.mpc)
+        obs, acts = self.mpc.sample_imaginary_rollouts(1, self.imaginary_steps, actor=expert)
+        #np.save(os.path.join(self.savedir, 'obs_imagined'), obs)
+        #np.save(os.path.join(self.savedir, 'act_imagined'), acts)
         #obs = np.load(os.path.join(self.savedir, 'obs_imagined.npy'))
         #acts = np.load(os.path.join(self.savedir, 'act_imagined.npy'))
         self.policy.train(obs, acts, iterative=False)
+        """
+
+        # Train paramaterized policy by DAgger under learned dynamics
+        """
+        print('Learned dynamics DAgger training...')
+        obs, acts = self.mpc.sample_imaginary_rollouts(1, 1000, actor=expert)
+        self.policy.train(obs, acts, iterative=True)
+        for _ in range(10):
+            obs, _ = self.mpc.sample_imaginary_rollouts(1, 1000, actor=self.policy)
+            labels = expert.act_parallel(obs)
+            self.policy.train(obs, labels, iterative=True)
+            self._sample_rollout(actor=self.policy, verbose=True)
+        """
 
         # Evaluate policy
         print(f'Evaluating {self.env_str}')
@@ -259,7 +282,10 @@ class Experiment:
         observations, actions, action_metrics, score = [self.env.reset()], [], [], 0
 
         for t in range(self.env.max_steps):
-            act, act_info = actor.act(observations[t])
+            if isinstance(actor, TD3):
+                act, act_info = actor.act(observations[t]), {}
+            else:
+                act, act_info = actor.act(observations[t])
             actions.append(act); action_metrics.append(act_info)
             obs, reward, done, _ = self.env.step(actions[t])
             observations.append(obs)

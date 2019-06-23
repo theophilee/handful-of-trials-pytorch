@@ -5,6 +5,7 @@ import math
 from utils import *
 from model import BootstrapEnsemble
 from optimizer import CEMOptimizer
+from TD3 import TD3
 
 
 class MPC:
@@ -273,7 +274,10 @@ class MPC:
         actions, scores = [], torch.zeros(num).to(TORCH_DEVICE)
 
         for t in range(max_steps):
-            actions.append(actor.act_parallel(observations[t])) # Computation bottleneck
+            acts = actor.act_parallel(observations[t]) # Computation bottleneck
+            if isinstance(actor, TD3):
+                acts = torch.from_numpy(acts)
+            actions.append(acts)
             obs, acts = observations[t].to(TORCH_DEVICE), actions[t].to(TORCH_DEVICE)
             next_obs = self._predict_next_obs_average(obs, acts)
             _, dones = self.get_reward(obs, acts, next_obs)

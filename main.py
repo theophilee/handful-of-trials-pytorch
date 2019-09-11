@@ -44,12 +44,7 @@ def main(args):
 
     # Run experiment
     exp = Experiment(mpc, policy, args.env, param_str, args.logdir, args.savedir, cfg.exp_cfg)
-    exp.mpc_baseline(args.load_controller, args.expert_demos)
-    #exp.collect_expert_demos()
-    #exp.debug_behavior_cloning()
-    #exp.debug_train_model()
-    #exp.debug_experiment()
-    #exp.debug_inner_loop()
+    exp.run_experiment(args.load_controller, args.expert_demos)
 
 
 if __name__ == "__main__":
@@ -62,27 +57,8 @@ if __name__ == "__main__":
                         help='Save directory.')
     parser.add_argument('--seed', type=int, default=2,
                         help='Random seed.')
-    #parser.add_argument('--action_repeat', type=int, default=1,
-    #                    help='Action repeat.')
     parser.add_argument('--stochasticity', type=str, default='gaussian_bias',
                         help='One of "deterministic", "gaussian", "gaussian_bias"')
-    parser.add_argument('--ensemble_size', type=int, default=5,
-                        help='Number of bootstrap ensemble dynamics models.')
-    parser.add_argument('--activation', type=str, default='swish',
-                        help='Activation function for dynamics model.')
-    parser.add_argument('--weight_decay', type=float, default=1e-4,
-                        help='Weight decay for dynamics model.')
-    parser.add_argument('--lr', type=float, default=1e-3,
-                        help='Learning rate for dynamics model.')
-    parser.add_argument('--plan_hor', type=int, default=25,
-                        help='Planning horizon for CEM.')
-    parser.add_argument('--num_part', type=int, default=20,
-                        help='Number of particles for CEM.')
-    parser.add_argument('--hid_features', default=[200, 200, 200, 200],
-                        type=lambda l: [int(x) for x in l.split(',')],
-                        help='Hidden layers of dynamics model.')
-    parser.add_argument('--iterations', type=int, default=5,
-                        help='Number of iterations to perform during CEM optimization.')
     parser.add_argument('--expert_demos', default=False, type=lambda x: (str(x).lower() == 'true'),
                         help='If True, add expert demonstrations to dynamics model training set.')
     parser.add_argument('--load_controller', default=False, type=lambda x: (str(x).lower() == 'true'),

@@ -4,7 +4,6 @@ import numpy as np
 import torch
 
 from utils import Logger, Metrics
-from TD3 import TD3
 
 
 def print_rollout_stats(obs, acts, length, score):
@@ -54,8 +53,8 @@ class Experiment:
         # TensorboardX summary writer
         self.logger = Logger(os.path.join(logdir, f"{env_str}_{param_str}"))
 
-    def mpc_baseline(self, load_controller, expert_demos):
-        """Model predictive control baseline, no parameterized policy.
+    def run_experiment(self, load_controller, expert_demos):
+        """Model predictive control.
 
         Arguments:
             load_controller (bool): If True, load mpc controller.
@@ -106,143 +105,6 @@ class Experiment:
 
             # Save model
             torch.save(self.mpc, os.path.join(self.savedir, 'mpc.pth'))
-
-    def debug_behavior_cloning(self):
-        """Train parameterized policy with behaviour cloning on saved expert demonstrations.
-        """
-        obs, acts = self._load_expert_demos()
-        obs, acts = obs[:, :-1].reshape(-1, obs.shape[-1]), acts.reshape(-1, acts.shape[-1])
-
-        # Train parameterized policy by behavior cloning
-        self.policy.train(obs, acts, iterative=False)
-
-        # Sample rollout from parameterized policy for evaluation
-        obs, acts, length, score, _ = self._sample_rollout(actor=self.policy, verbose=True)
-
-        torch.save(self.policy, os.path.join(self.savedir, 'policy.pth'))
-
-    def debug_train_model(self):
-        """Train dynamics model on saved expert demonstrations.
-        """
-        #obs, acts, _, _ = self._sample_rollouts(self.init_steps, actor=self.mpc)
-        obs, acts = self._load_expert_demos()
-
-        self.mpc.train_initial(obs, acts, debug_logger=self.logger)
-
-        torch.save(self.mpc, os.path.join(self.savedir, 'mpc.pth'))
-
-    def debug_experiment(self):
-        """Train parameterized policy by imitation learning (DAgger) on trajectories
-        generated under the learned dynamics model, using pretrained dynamics model.
-        """
-        #self.debug_behavior_cloning()
-        #self.run_train_model_debug()
-
-        # Load pretrained model
-        self.mpc = torch.load(os.path.join(self.savedir, 'mpc.pth'))
-
-        # Load pretrained expert
-        expert = torch.load(os.path.join(self.savedir, 'policy.pth'))
-        obs, acts, length, score, _ = self._sample_rollout(actor=expert)
-        print("Expert performance")
-        print_rollout_stats(obs, acts, length, score)
-
-        # Train parameterized policy by imitating expert under learned model
-        for i in range(self.imaginary_rollouts):
-            # Train
-            sample_imaginary_rollouts(num, max_steps, actor)
-            obs, acts, score = self.mpc.sample_imaginary_rollouts(1, actor=self.policy)
-            obs = obs.view([-1, obs.shape[-1]])
-            labels = expert.act_parallel(obs)
-            metrics = self.policy.train(obs, labels, iterative=True)
-            print(f"Validation loss after training policy {metrics['policy/mse/val']}")
-
-            # Evaluate
-            obs_eval, acts_eval, score_eval = self._sample_rollout(actor=self.policy)
-
-            print(f"\nTraining iteration {i}")
-            print("Imaginary rollout statistics")
-            print_rollout_stats(obs, acts, score)
-            print("Evaluation statistics")
-            print_rollout_stats(obs_eval, acts_eval, score_eval)
-
-        torch.save(self.policy, os.path.join(self.savedir, 'policy_imitation.pth'))
-        """
-        for _ in range(20):
-            expert = torch.load(os.path.join(self.savedir, 'policy.pth'))
-            imitator = torch.load(os.path.join(self.savedir, 'policy_imitation.pth'))
-            obs_expert, acts_expert, score_expert = self._sample_rollout(actor=expert)
-            obs_imitation, acts_imitation, score_imitation = self._sample_rollout(actor=imitator)
-            print_rollout_stats(obs_expert, acts_expert, score_expert)
-            print_rollout_stats(obs_imitation, acts_imitation, score_imitation)
-            print()
-        """
-
-    def debug_inner_loop(self):
-        # Load pretrained model
-        mpc_path = f'/home/theophile/Documents/research/handful-of-trials-pytorch/save/main/{self.env_str}/gaussian_bias/mpc.pth'
-        self.mpc = torch.load(mpc_path)
-
-        #expert = TD3(self.env.observation_space.shape[0], self.env.action_space.shape[0], self.env.action_space.high[0])
-        #expert.load('MyHalfCheetah-v2', '/home/theophile/Documents/research/handful-of-trials-pytorch/save/TD3')
-
-        # Evaluate pretrained expert
-        #print('Expert performance')
-        #self._sample_rollout(actor=expert, verbose=True)
-        #self._sample_rollout(actor=self.mpc, verbose=True)
-
-        # Train paramaterized policy by behavior cloning under true dynamics
-        print('True dynamics BC training...')
-        obs, acts, _, _, _ = self._sample_rollouts(self.imaginary_steps, actor=self.mpc)
-        #obs, acts, _, _, _ = self._sample_rollouts(self.imaginary_steps, actor=expert)
-        rollouts_path = f'/home/theophile/Documents/research/handful-of-trials-pytorch/save/expert_demonstrations/{self.env_str}'
-        np.save(os.path.join(rollouts_path, 'obs'), obs)
-        np.save(os.path.join(rollouts_path, 'act'), acts)
-        #obs = np.load(os.path.join(rollouts_path, 'obs.npy'))
-        #acts = np.load(os.path.join(rollouts_path, 'act.npy'))
-        obs, acts = np.concatenate([o[:-1] for o in obs]), np.concatenate(acts)
-        self.policy.train(obs, acts, iterative=False)
-
-        # Train parameterized policy by DAgger under true dynamics
-        """
-        print('True dynamics DAgger training...')
-        obs, acts, _, _, _ = self._sample_rollout(actor=expert)
-        #obs, acts, _, _, _ = self._sample_rollout(actor=self.mpc)
-        self.policy.train(obs[:-1], acts, iterative=True)
-        for _ in range(10):
-            obs, _, _, _, _ = self._sample_rollout(actor=self.policy, verbose=True)
-            labels = expert.act_parallel(obs[:-1])
-            #labels = self.mpc.act_parallel(obs[:-1])
-            self.policy.train(obs[:-1], labels, iterative=True)
-        """
-
-        # Train paramaterized policy by behavior cloning under learned dynamics
-        """
-        print('Learned dynamics BC training...')
-        #obs, acts = self.mpc.sample_imaginary_rollouts(1, self.imaginary_steps, actor=self.mpc)
-        obs, acts = self.mpc.sample_imaginary_rollouts(1, self.imaginary_steps, actor=expert)
-        #np.save(os.path.join(self.savedir, 'obs_imagined'), obs)
-        #np.save(os.path.join(self.savedir, 'act_imagined'), acts)
-        #obs = np.load(os.path.join(self.savedir, 'obs_imagined.npy'))
-        #acts = np.load(os.path.join(self.savedir, 'act_imagined.npy'))
-        self.policy.train(obs, acts, iterative=False)
-        """
-
-        # Train paramaterized policy by DAgger under learned dynamics
-        """
-        print('Learned dynamics DAgger training...')
-        obs, acts = self.mpc.sample_imaginary_rollouts(1, 1000, actor=expert)
-        self.policy.train(obs, acts, iterative=True)
-        for _ in range(10):
-            obs, _ = self.mpc.sample_imaginary_rollouts(1, 1000, actor=self.policy)
-            labels = expert.act_parallel(obs)
-            self.policy.train(obs, labels, iterative=True)
-            self._sample_rollout(actor=self.policy, verbose=True)
-        """
-
-        # Evaluate policy
-        print(f'Evaluating {self.env_str}')
-        self._sample_rollout(actor=self.policy, verbose=True)
 
     def _load_expert_demos(self):
         path = os.path.join('save/expert_demonstrations', self.env_str)
